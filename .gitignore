@@ -1,0 +1,7 @@
+node_modules/
+data/exam.db
+data/exam.db-shm
+data/exam.db-wal
+data/images/*
+!data/images/.gitkeep
+.env

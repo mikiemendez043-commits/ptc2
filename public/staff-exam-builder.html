@@ -1,0 +1,308 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Staff Exam Builder — PTC-Catanduanes Exam System</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <main class="page-shell">
+    <div class="page-header">
+      <div>
+        <p class="eyebrow">Question Bank</p>
+        <h1>Manage Exam Questions</h1>
+      </div>
+      <div class="flex-gap-center">
+        <a class="button button-secondary" href="staff-dashboard.html">Back</a>
+        <a class="button button-secondary" href="index.html">Home</a>
+      </div>
+    </div>
+
+    <div class="tab-list" id="examTabs"></div>
+    <section class="form-card" style="margin-bottom: 1.5rem;">
+      <div class="flex-gap-center" style="justify-content: space-between;">
+        <div>
+          <h2 id="builderTitle">Add Question</h2>
+          <p class="inline-note" id="builderInstruction">Create a new exam question or edit an existing one.</p>
+        </div>
+        <div>
+          <span class="tag" id="itemCountTag"></span>
+        </div>
+      </div>
+
+      <form id="questionForm">
+        <div class="form-field" style="margin-top: 1rem;">
+          <label for="questionText">Question text</label>
+          <textarea id="questionText" required></textarea>
+        </div>
+        <div class="form-field" style="margin-top: 1rem;">
+          <label for="imageUpload">Optional image</label>
+          <input id="imageUpload" type="file" accept="image/*" />
+          <div id="imagePreview" style="margin-top: 0.75rem;"></div>
+        </div>
+        <div class="grid-columns" style="grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1rem; margin-top: 1rem;">
+          <div class="form-field">
+            <label for="choiceA">Choice A</label>
+            <input id="choiceA" required />
+          </div>
+          <div class="form-field">
+            <label for="choiceB">Choice B</label>
+            <input id="choiceB" required />
+          </div>
+          <div class="form-field">
+            <label for="choiceC">Choice C</label>
+            <input id="choiceC" required />
+          </div>
+          <div class="form-field">
+            <label for="choiceD">Choice D</label>
+            <input id="choiceD" required />
+          </div>
+        </div>
+        <div class="form-field" style="margin-top: 1rem;">
+          <label for="correctChoice">Correct answer</label>
+          <select id="correctChoice" required>
+            <option value="">Select correct answer</option>
+            <option value="A">A</option>
+            <option value="B">B</option>
+            <option value="C">C</option>
+            <option value="D">D</option>
+          </select>
+        </div>
+        <div class="flex-gap" style="margin-top: 1.25rem; flex-wrap: wrap;">
+          <button class="button button-primary" type="submit">Save Question</button>
+          <button class="button button-ghost" type="button" id="resetForm">Clear</button>
+        </div>
+        <div class="inline-note" id="formError"></div>
+      </form>
+      <div class="inline-note">The bank progress updates automatically as questions are added or removed.</div>
+    </section>
+
+    <section class="table-card">
+      <div class="flex-gap-center" style="margin-bottom: 1rem; justify-content: space-between;">
+        <div>
+          <h2>Question Bank</h2>
+          <p class="inline-note">Questions are grouped by the selected exam type.</p>
+        </div>
+        <span class="status-warning" id="completionStatus"></span>
+      </div>
+      <div id="questionList"><p class="inline-note">Loading...</p></div>
+    </section>
+  </main>
+
+  <script src="app.js"></script>
+  <script>
+    const examTabs = document.getElementById('examTabs');
+    const builderTitle = document.getElementById('builderTitle');
+    const itemCountTag = document.getElementById('itemCountTag');
+    const completionStatus = document.getElementById('completionStatus');
+    const questionList = document.getElementById('questionList');
+    const questionForm = document.getElementById('questionForm');
+    const imageUpload = document.getElementById('imageUpload');
+    const imagePreview = document.getElementById('imagePreview');
+    const resetFormButton = document.getElementById('resetForm');
+    const formError = document.getElementById('formError');
+
+    let EXAM_TYPES = [];
+    let REQUIRED_COUNTS = {};
+    let activeExamType = null;
+    let editingQuestionId = null;
+    let editingExistingImageUrl = null; // server-relative path, e.g. /exam-images/xyz.png
+    let removeImageFlag = false;
+    let currentQuestions = [];
+
+    function requiredCountFor(type) {
+      const counts = { OLT01: 35, TLT01: 35, TNT01: 30 };
+      return counts[type] || 0;
+    }
+
+    function createExamTabs() {
+      examTabs.innerHTML = EXAM_TYPES.map(type => `<button class="tab-button ${type === activeExamType ? 'active' : ''}" data-type="${type}" type="button">${type}</button>`).join('');
+      examTabs.querySelectorAll('.tab-button').forEach(button => {
+        button.addEventListener('click', () => {
+          activeExamType = button.dataset.type;
+          window.history.replaceState(null, '', `?type=${activeExamType}`);
+          clearForm();
+          createExamTabs();
+          refreshPage();
+        });
+      });
+    }
+
+    async function refreshPage() {
+      builderTitle.textContent = editingQuestionId ? `Edit Question (${activeExamType})` : `Add Question (${activeExamType})`;
+      questionList.innerHTML = '<p class="inline-note">Loading...</p>';
+      try {
+        currentQuestions = await api.getQuestions(activeExamType);
+      } catch (error) {
+        questionList.innerHTML = `<p class="inline-note">Failed to load questions: ${error.message}</p>`;
+        return;
+      }
+      const required = requiredCountFor(activeExamType);
+      itemCountTag.textContent = `${currentQuestions.length} / ${required} items`;
+      completionStatus.textContent = currentQuestions.length >= required ? 'Bank complete' : `Only ${currentQuestions.length} of ${required} items added`;
+      completionStatus.className = currentQuestions.length >= required ? 'status-success' : 'status-warning';
+      questionList.innerHTML = currentQuestions.length ? currentQuestions.map(renderQuestionItem).join('') : '<p class="inline-note">No questions added yet for this exam type.</p>';
+      attachQuestionActions();
+    }
+
+    function renderQuestionItem(question) {
+      const choicesHtml = question.choices.map(choice => `
+        <div class="option-row" style="padding:0.35rem 0;"> 
+          <strong>${choice.id}.</strong>
+          <span style="margin-left:0.75rem; ${question.correctChoiceId === choice.id ? 'color: var(--accent); font-weight: 700;' : ''}">${choice.text}</span>
+        </div>
+      `).join('');
+      return `
+        <article class="question-card" data-question-id="${question.id}">
+          <h3>${question.questionText}</h3>
+          ${question.imageUrl ? `<img src="${question.imageUrl}" alt="Question image" style="margin-top:1rem; border-radius: 14px; max-height: 220px; object-fit: contain;" />` : ''}
+          <div style="margin-top:1rem;">${choicesHtml}</div>
+          <div class="flex-gap" style="margin-top:1rem;">
+            <button class="button button-secondary edit-button" type="button">Edit</button>
+            <button class="button button-danger delete-button" type="button">Delete</button>
+          </div>
+        </article>
+      `;
+    }
+
+    function attachQuestionActions() {
+      questionList.querySelectorAll('.edit-button').forEach(button => {
+        button.addEventListener('click', event => {
+          const questionId = event.target.closest('[data-question-id]').dataset.questionId;
+          loadQuestionForEdit(questionId);
+        });
+      });
+      questionList.querySelectorAll('.delete-button').forEach(button => {
+        button.addEventListener('click', async event => {
+          const questionId = event.target.closest('[data-question-id]').dataset.questionId;
+          if (!confirm('Delete this question permanently?')) return;
+          try {
+            await api.deleteQuestion(questionId);
+            refreshPage();
+          } catch (error) {
+            alert(`Failed to delete: ${error.message}`);
+          }
+        });
+      });
+    }
+
+    function loadQuestionForEdit(id) {
+      const question = currentQuestions.find(item => item.id === id);
+      if (!question) return;
+      editingQuestionId = question.id;
+      editingExistingImageUrl = question.imageUrl || null;
+      removeImageFlag = false;
+      document.getElementById('questionText').value = question.questionText;
+      document.getElementById('choiceA').value = question.choices[0]?.text || '';
+      document.getElementById('choiceB').value = question.choices[1]?.text || '';
+      document.getElementById('choiceC').value = question.choices[2]?.text || '';
+      document.getElementById('choiceD').value = question.choices[3]?.text || '';
+      document.getElementById('correctChoice').value = question.correctChoiceId;
+      imageUpload.value = '';
+      renderImagePreview(editingExistingImageUrl);
+      builderTitle.textContent = `Edit Question (${activeExamType})`;
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    }
+
+    function renderImagePreview(source) {
+      if (!source) {
+        imagePreview.innerHTML = '';
+        return;
+      }
+      imagePreview.innerHTML = `
+        <div style="max-width: 240px; border-radius: 16px; overflow:hidden; border:1px solid rgba(148,163,184,0.2);"><img src="${source}" alt="Preview image" /></div>
+        <button type="button" class="button button-ghost" id="removeImageButton" style="margin-top:0.5rem;">Remove image</button>
+      `;
+      document.getElementById('removeImageButton').addEventListener('click', () => {
+        editingExistingImageUrl = null;
+        removeImageFlag = true;
+        imageUpload.value = '';
+        renderImagePreview(null);
+      });
+    }
+
+    function clearForm() {
+      questionForm.reset();
+      editingQuestionId = null;
+      editingExistingImageUrl = null;
+      removeImageFlag = false;
+      imagePreview.innerHTML = '';
+      formError.textContent = '';
+      builderTitle.textContent = `Add Question (${activeExamType})`;
+    }
+
+    imageUpload.addEventListener('change', event => {
+      const file = event.target.files[0];
+      removeImageFlag = false;
+      if (!file) {
+        renderImagePreview(editingExistingImageUrl);
+        return;
+      }
+      const reader = new FileReader();
+      reader.onload = () => renderImagePreview(reader.result);
+      reader.readAsDataURL(file);
+    });
+
+    questionForm.addEventListener('submit', async event => {
+      event.preventDefault();
+      formError.textContent = '';
+      const questionText = document.getElementById('questionText').value.trim();
+      const choiceA = document.getElementById('choiceA').value.trim();
+      const choiceB = document.getElementById('choiceB').value.trim();
+      const choiceC = document.getElementById('choiceC').value.trim();
+      const choiceD = document.getElementById('choiceD').value.trim();
+      const correctChoice = document.getElementById('correctChoice').value;
+
+      if (!questionText || !choiceA || !choiceB || !choiceC || !choiceD || !correctChoice) {
+        formError.textContent = 'Please complete the question, all choices, and mark the correct answer.';
+        formError.className = 'alert-box';
+        return;
+      }
+
+      const formData = new FormData();
+      formData.append('examType', activeExamType);
+      formData.append('questionText', questionText);
+      formData.append('choiceA', choiceA);
+      formData.append('choiceB', choiceB);
+      formData.append('choiceC', choiceC);
+      formData.append('choiceD', choiceD);
+      formData.append('correctChoiceId', correctChoice);
+      if (imageUpload.files[0]) {
+        formData.append('image', imageUpload.files[0]);
+      }
+      if (removeImageFlag) {
+        formData.append('removeImage', 'true');
+      } else if (editingExistingImageUrl) {
+        // Pass through the existing server filename (strip the /exam-images/ prefix) so the
+        // server keeps it if no new file was chosen.
+        formData.append('existingImagePath', editingExistingImageUrl.replace('/exam-images/', ''));
+      }
+
+      try {
+        await api.saveQuestion(formData, editingQuestionId);
+        clearForm();
+        refreshPage();
+      } catch (error) {
+        formError.textContent = error.message;
+        formError.className = 'alert-box';
+      }
+    });
+
+    resetFormButton.addEventListener('click', () => {
+      clearForm();
+    });
+
+    (async function init() {
+      const ok = await requireStaffSession();
+      if (!ok) return;
+      const config = await api.getConfig();
+      EXAM_TYPES = config.examTypes;
+      const requestedType = getQueryParam('type');
+      activeExamType = EXAM_TYPES.includes(requestedType) ? requestedType : EXAM_TYPES[0];
+      createExamTabs();
+      refreshPage();
+    })();
+  </script>
+</body>
+</html>

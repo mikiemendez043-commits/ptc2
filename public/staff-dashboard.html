@@ -1,0 +1,71 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Staff Dashboard — PTC-Catanduanes Exam System</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <main class="page-shell">
+    <div class="page-header">
+      <div>
+        <p class="eyebrow">Staff Dashboard</p>
+        <h1>Exam Management</h1>
+      </div>
+      <button class="button button-secondary" id="logoutButton" type="button">Logout</button>
+    </div>
+
+    <section class="hero-card" style="margin-bottom: 1.5rem;">
+      <p class="lead">Review question bank status and student exam activity for each exam type. Click a card to manage questions or view results.</p>
+      <div class="flex-gap" style="margin-top: 1.25rem;">
+        <a class="button button-primary" href="staff-access-codes.html">Generate Access Codes</a>
+      </div>
+    </section>
+
+    <section class="grid-columns grid-3" id="dashboardCards">
+      <p class="inline-note">Loading...</p>
+    </section>
+  </main>
+
+  <script src="app.js"></script>
+  <script>
+    const dashboardCards = document.getElementById('dashboardCards');
+    const logoutButton = document.getElementById('logoutButton');
+
+    async function renderDashboard() {
+      try {
+        const summary = await api.getDashboardSummary();
+        dashboardCards.innerHTML = summary.map(item => {
+          const incomplete = item.questionCount < item.requiredCount;
+          return `
+            <article class="card">
+              <h3>${item.examType}</h3>
+              <p>${item.questionCount} / ${item.requiredCount} items</p>
+              ${incomplete ? `<p class="status-warning" style="margin-top:0.75rem; display:inline-block;">Only ${item.questionCount} of ${item.requiredCount} items added</p>` : `<p class="status-success" style="margin-top:0.75rem; display:inline-block;">Bank complete</p>`}
+              <div class="inline-note" style="margin-top:1rem;">${item.attemptCount} student attempt${item.attemptCount === 1 ? '' : 's'} recorded</div>
+              <div class="flex-gap" style="margin-top:1.5rem;">
+                <a class="button button-primary" href="staff-exam-builder.html?type=${item.examType}">Manage Questions</a>
+                <a class="button button-secondary" href="staff-results.html?type=${item.examType}">View Results</a>
+              </div>
+            </article>
+          `;
+        }).join('');
+      } catch (error) {
+        dashboardCards.innerHTML = `<p class="inline-note">Failed to load dashboard: ${error.message}</p>`;
+      }
+    }
+
+    logoutButton.addEventListener('click', async () => {
+      await api.logout();
+      window.location.href = 'staff-login.html';
+    });
+
+    (async function init() {
+      const ok = await requireStaffSession();
+      if (!ok) return;
+      renderDashboard();
+    })();
+  </script>
+</body>
+</html>

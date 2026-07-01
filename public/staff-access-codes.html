@@ -1,0 +1,261 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Access Codes — PTC-Catanduanes Exam System</title>
+  <link rel="stylesheet" href="styles.css">
+  <style>
+    .code-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+      gap: 0.6rem;
+      margin-top: 1.25rem;
+    }
+    .code-chip {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 0.75rem 0.5rem;
+      border-radius: 10px;
+      border: 1.5px solid rgba(148, 163, 184, 0.3);
+      background: #fff;
+      font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+      font-size: 1.05rem;
+      font-weight: 700;
+      letter-spacing: 0.08em;
+      color: var(--primary);
+      transition: transform 0.12s ease, box-shadow 0.12s ease;
+    }
+    .code-chip.used {
+      color: var(--text-muted);
+      background: var(--surface-strong);
+      text-decoration: line-through;
+      border-color: rgba(148, 163, 184, 0.2);
+    }
+    .batch-row {
+      cursor: pointer;
+    }
+    .batch-row:hover {
+      background: #f8fafc;
+    }
+    .copy-toast {
+      position: fixed;
+      bottom: 1.5rem;
+      left: 50%;
+      transform: translateX(-50%) translateY(10px);
+      background: var(--primary);
+      color: #fff;
+      padding: 0.75rem 1.25rem;
+      border-radius: 999px;
+      font-weight: 600;
+      font-size: 0.9rem;
+      box-shadow: 0 12px 30px rgba(15, 23, 42, 0.25);
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity 0.2s ease, transform 0.2s ease;
+      z-index: 100;
+    }
+    .copy-toast.show {
+      opacity: 1;
+      transform: translateX(-50%) translateY(0);
+    }
+  </style>
+</head>
+<body>
+  <main class="page-shell">
+    <div class="page-header">
+      <div>
+        <p class="eyebrow">Exam Authorization</p>
+        <h1>Access Codes</h1>
+      </div>
+      <a class="button button-secondary" href="staff-dashboard.html">Back</a>
+    </div>
+
+    <section class="panel-card" style="margin-bottom: 1.5rem;">
+      <h2>Generate a new batch</h2>
+      <p class="inline-note">Each code unlocks exactly one exam attempt for any exam type, and stops working the moment a student enters it. Codes expire at the end of the day they're generated.</p>
+      <form id="generateForm" class="flex-gap-center" style="margin-top: 1.25rem; align-items: flex-end;">
+        <div class="form-field" style="max-width: 220px;">
+          <label for="codeCount">How many students?</label>
+          <input id="codeCount" type="number" min="1" max="200" value="20" required />
+        </div>
+        <button class="button button-primary" type="submit">Generate Codes</button>
+      </form>
+      <div id="generateError" class="inline-note"></div>
+    </section>
+
+    <section class="panel-card" id="newBatchSection" style="display: none; margin-bottom: 1.5rem;">
+      <div class="flex-gap-center" style="justify-content: space-between;">
+        <div>
+          <h2>New batch ready</h2>
+          <p class="inline-note" id="newBatchMeta"></p>
+        </div>
+        <div class="flex-gap">
+          <button class="button button-secondary" id="copyAllButton" type="button">Copy All</button>
+          <button class="button button-secondary" id="printButton" type="button">Print</button>
+        </div>
+      </div>
+      <div class="code-grid" id="newBatchGrid"></div>
+    </section>
+
+    <section class="table-card">
+      <h2>Past batches</h2>
+      <p class="inline-note">Click a batch to view individual codes and usage.</p>
+      <div id="batchList" style="margin-top: 1.25rem;"><p class="inline-note">Loading...</p></div>
+    </section>
+  </main>
+
+  <div class="copy-toast" id="copyToast">Copied to clipboard</div>
+
+  <script src="app.js"></script>
+  <script>
+    const generateForm = document.getElementById('generateForm');
+    const codeCountInput = document.getElementById('codeCount');
+    const generateError = document.getElementById('generateError');
+    const newBatchSection = document.getElementById('newBatchSection');
+    const newBatchMeta = document.getElementById('newBatchMeta');
+    const newBatchGrid = document.getElementById('newBatchGrid');
+    const copyAllButton = document.getElementById('copyAllButton');
+    const printButton = document.getElementById('printButton');
+    const batchList = document.getElementById('batchList');
+    const copyToast = document.getElementById('copyToast');
+
+    let lastGeneratedCodes = [];
+
+    function showToast(message) {
+      copyToast.textContent = message;
+      copyToast.classList.add('show');
+      setTimeout(() => copyToast.classList.remove('show'), 1800);
+    }
+
+    function formatDateTime(isoString) {
+      try {
+        return new Date(isoString).toLocaleString(undefined, {
+          year: 'numeric', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit'
+        });
+      } catch {
+        return isoString;
+      }
+    }
+
+    generateForm.addEventListener('submit', async event => {
+      event.preventDefault();
+      generateError.textContent = '';
+      const count = Number(codeCountInput.value);
+      try {
+        const batch = await api.generateAccessCodes(count);
+        lastGeneratedCodes = batch.codes;
+        newBatchMeta.textContent = `${batch.codes.length} codes · expires ${formatDateTime(batch.expiresAt)}`;
+        newBatchGrid.innerHTML = batch.codes.map(code => `<div class="code-chip">${code}</div>`).join('');
+        newBatchSection.style.display = 'block';
+        newBatchSection.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        await loadBatches();
+      } catch (error) {
+        generateError.textContent = error.message;
+        generateError.className = 'alert-box';
+      }
+    });
+
+    copyAllButton.addEventListener('click', async () => {
+      if (!lastGeneratedCodes.length) return;
+      try {
+        await navigator.clipboard.writeText(lastGeneratedCodes.join('\n'));
+        showToast('All codes copied');
+      } catch {
+        showToast('Could not copy automatically — select and copy manually');
+      }
+    });
+
+    printButton.addEventListener('click', () => {
+      window.print();
+    });
+
+    async function loadBatches() {
+      try {
+        const batches = await api.getAccessCodeBatches();
+        if (!batches.length) {
+          batchList.innerHTML = '<p class="inline-note">No batches generated yet.</p>';
+          return;
+        }
+        batchList.innerHTML = `
+          <table>
+            <thead>
+              <tr>
+                <th>Generated</th>
+                <th>Expires</th>
+                <th>Total Codes</th>
+                <th>Used</th>
+                <th>Remaining</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody>
+              ${batches.map(b => `
+                <tr class="batch-row" data-batch-id="${b.batchId}">
+                  <td>${formatDateTime(b.createdAt)}</td>
+                  <td>${formatDateTime(b.expiresAt)}</td>
+                  <td>${b.total}</td>
+                  <td>${b.used}</td>
+                  <td>${b.total - b.used}</td>
+                  <td>
+                    ${b.total - b.used > 0 ? `<button class="button button-danger delete-batch-btn" style="padding: 0.45rem 0.85rem; font-size: 0.85rem;" data-batch-id="${b.batchId}" data-unused="${b.total - b.used}" type="button">Delete unused</button>` : '<span style="color: var(--text-muted); font-size: 0.85rem;">All used</span>'}
+                  </td>
+                </tr>
+              `).join('')}
+            </tbody>
+          </table>
+          <div id="batchDetail" style="margin-top: 1.5rem;"></div>
+        `;
+        batchList.querySelectorAll('.batch-row').forEach(row => {
+          row.addEventListener('click', e => {
+            if (e.target.closest('.delete-batch-btn')) return;
+            openBatchDetail(row.getAttribute('data-batch-id'));
+          });
+        });
+        batchList.querySelectorAll('.delete-batch-btn').forEach(btn => {
+          btn.addEventListener('click', async e => {
+            e.stopPropagation();
+            const batchId = btn.getAttribute('data-batch-id');
+            const unused = btn.getAttribute('data-unused');
+            if (!confirm(`Delete ${unused} unused code${unused === '1' ? '' : 's'} from this batch? Used codes will be kept for records.`)) return;
+            try {
+              const result = await api.deleteAccessCodeBatch(batchId);
+              showToast(`${result.deleted} code${result.deleted === 1 ? '' : 's'} deleted`);
+              await loadBatches();
+            } catch (error) {
+              alert(error.message);
+            }
+          });
+        });
+      } catch (error) {
+        batchList.innerHTML = `<p class="inline-note">Failed to load batches: ${error.message}</p>`;
+      }
+    }
+
+    async function openBatchDetail(batchId) {
+      const detail = document.getElementById('batchDetail');
+      if (!detail) return;
+      detail.innerHTML = '<p class="inline-note">Loading codes...</p>';
+      try {
+        const data = await api.getAccessCodeBatch(batchId);
+        detail.innerHTML = `
+          <h3>Batch codes</h3>
+          <div class="code-grid">
+            ${data.codes.map(c => `<div class="code-chip ${c.usedAt ? 'used' : ''}" title="${c.usedAt ? 'Used ' + formatDateTime(c.usedAt) : 'Unused'}">${c.code}</div>`).join('')}
+          </div>
+        `;
+        detail.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+      } catch (error) {
+        detail.innerHTML = `<p class="inline-note">Failed to load batch: ${error.message}</p>`;
+      }
+    }
+
+    (async function init() {
+      const ok = await requireStaffSession();
+      if (!ok) return;
+      loadBatches();
+    })();
+  </script>
+</body>
+</html>

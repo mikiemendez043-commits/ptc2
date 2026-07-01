@@ -1,0 +1,54 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Staff Login — PTC-Catanduanes Exam System</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <main class="page-shell page-center">
+    <section class="hero-card" style="max-width: 520px;">
+      <div>
+        <p class="eyebrow">Staff Access</p>
+        <h1>Staff Login</h1>
+        <p class="lead">Sign in to manage exams and review student results.</p>
+      </div>
+      <form id="loginForm" class="form-card" style="margin-top: 1.5rem;">
+        <div class="form-field">
+          <label for="username">Username</label>
+          <input id="username" name="username" required autocomplete="username" />
+        </div>
+        <div class="form-field" style="margin-top: 1rem;">
+          <label for="password">Password</label>
+          <input id="password" name="password" type="password" required autocomplete="current-password" />
+        </div>
+        <div class="inline-note" id="loginMessage"></div>
+        <button class="button button-primary" type="submit" style="margin-top: 1.25rem; width: 100%;">Sign In</button>
+      </form>
+
+    </section>
+  </main>
+
+  <script src="app.js"></script>
+  <script>
+    const loginForm = document.getElementById('loginForm');
+    const loginMessage = document.getElementById('loginMessage');
+
+    loginForm.addEventListener('submit', async event => {
+      event.preventDefault();
+      const username = document.getElementById('username').value.trim();
+      const password = document.getElementById('password').value;
+      loginMessage.textContent = '';
+      loginMessage.className = 'inline-note';
+      try {
+        await api.login(username, password);
+        window.location.href = 'staff-dashboard.html';
+      } catch (error) {
+        loginMessage.textContent = error.message;
+        loginMessage.className = 'alert-box';
+      }
+    });
+  </script>
+</body>
+</html>
