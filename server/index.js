@@ -4,6 +4,7 @@ const crypto = require('crypto');
 const express = require('express');
 const session = require('express-session');
 const multer = require('multer');
+const sharp = require('sharp');
 
 const { db, IMAGES_DIR } = require('./db');
 const { requireStaffAuth } = require('./auth');
@@ -22,7 +23,7 @@ const STAFF_USERNAME = process.env.STAFF_USERNAME || 'admin';
 const STAFF_PASSWORD = process.env.STAFF_PASSWORD || 'admin123';
 const EXAM_DURATION_MS = 60 * 60 * 1000;
 
-app.use(express.json({ limit: '2mb' }));
+app.use(express.json({ limit: '20mb' }));
 app.use(session({
   secret: process.env.SESSION_SECRET || 'change-this-secret-before-deploying',
   resave: false,
@@ -35,7 +36,7 @@ app.use(session({
 
 const upload = multer({
   storage: multer.memoryStorage(),
-  limits: { fileSize: 5 * 1024 * 1024 },
+  limits: { fileSize: 10 * 1024 * 1024 },
   fileFilter: (req, file, cb) => {
     if (!file.mimetype.startsWith('image/')) {
       return cb(new Error('Only image files are allowed'));
@@ -201,9 +202,9 @@ app.post('/api/questions', requireStaffAuth, upload.single('image'), async (req,
     let imageData = null;
     let imagePath = null;
     if (req.file) {
-      const mimeType = req.file.mimetype;
-      const b64 = req.file.buffer.toString('base64');
-      imageData = `data:${mimeType};base64,${b64}`;
+      const resized = await sharp(req.file.buffer).resize({ width: 800, withoutEnlargement: true }).jpeg({ quality: 70 }).toBuffer();
+      const b64 = resized.toString('base64');
+      imageData = `data:image/jpeg;base64,${b64}`;
     } else if (existingImagePath && removeImage !== 'true') {
       imagePath = existingImagePath;
     }
@@ -240,9 +241,9 @@ app.put('/api/questions/:id', requireStaffAuth, upload.single('image'), async (r
     let imageData = existing.imageData || null;
     let imagePath = existing.imagePath || null;
     if (req.file) {
-      const mimeType = req.file.mimetype;
-      const b64 = req.file.buffer.toString('base64');
-      imageData = `data:${mimeType};base64,${b64}`;
+      const resized = await sharp(req.file.buffer).resize({ width: 800, withoutEnlargement: true }).jpeg({ quality: 70 }).toBuffer();
+      const b64 = resized.toString('base64');
+      imageData = `data:image/jpeg;base64,${b64}`;
       imagePath = null; // new upload replaces any legacy path
     } else if (removeImage === 'true') {
       imageData = null;
