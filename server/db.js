@@ -20,6 +20,7 @@ async function initDb() {
       examType TEXT NOT NULL,
       questionText TEXT NOT NULL,
       imagePath TEXT,
+      imageData TEXT,
       choiceA TEXT NOT NULL,
       choiceB TEXT NOT NULL,
       choiceC TEXT NOT NULL,
@@ -64,5 +65,21 @@ async function initDb() {
 }
 
 initDb().catch(console.error);
+
+// Migration: add imageData column if it doesn't exist yet (for existing deployments)
+async function migrateDb() {
+  try {
+    const cols = await db.execute("SELECT name FROM pragma_table_info('questions')");
+    const hasImageData = cols.rows.some(r => r.name === 'imageData');
+    if (!hasImageData) {
+      await db.execute('ALTER TABLE questions ADD COLUMN imageData TEXT');
+      console.log('Migration: added imageData column to questions table.');
+    }
+  } catch (e) {
+    // pragma_table_info not available on all libsql versions — ignore if migration check fails
+    console.warn('Migration check skipped:', e.message);
+  }
+}
+migrateDb().catch(console.error);
 
 module.exports = { db, IMAGES_DIR };
