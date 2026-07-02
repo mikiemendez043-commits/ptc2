@@ -34,7 +34,13 @@ app.use(session({
 }));
 
 const upload = multer({
-  storage: multer.memoryStorage(),
+  storage: multer.diskStorage({
+    destination: (req, file, cb) => cb(null, IMAGES_DIR),
+    filename: (req, file, cb) => {
+      const ext = path.extname(file.originalname) || '';
+      cb(null, `${crypto.randomUUID()}${ext}`);
+    }
+  }),
   limits: { fileSize: 5 * 1024 * 1024 },
   fileFilter: (req, file, cb) => {
     if (!file.mimetype.startsWith('image/')) {
@@ -44,6 +50,7 @@ const upload = multer({
   }
 });
 
+app.use('/exam-images', express.static(IMAGES_DIR));
 app.use(express.static(path.join(__dirname, '..', 'public')));
 
 // ---------------------------------------------------------------------------
@@ -77,19 +84,11 @@ app.get('/api/session', (req, res) => {
 // Helpers
 // ---------------------------------------------------------------------------
 function rowToQuestion(row) {
-  let imageUrl = null;
-  if (row.imageData) {
-    // New style: base64 data URL stored directly in DB (cloud-safe)
-    imageUrl = row.imageData;
-  } else if (row.imagePath) {
-    // Legacy: file stored locally — still serve it if the file exists
-    imageUrl = `/exam-images/${row.imagePath}`;
-  }
   return {
     id: row.id,
     examType: row.examType,
     questionText: row.questionText,
-    imageUrl,
+    imageUrl: row.imagePath ? `/exam-images/${row.imagePath}` : null,
     choices: [
       { id: 'A', text: row.choiceA },
       { id: 'B', text: row.choiceB },
@@ -134,7 +133,7 @@ function buildAnswerDetails(questionRows, answers) {
     return {
       questionId: row.id,
       questionText: row.questionText,
-      imageUrl: row.imageData ? row.imageData : (row.imagePath ? `/exam-images/${row.imagePath}` : null),
+      imageUrl: row.imagePath ? `/exam-images/${row.imagePath}` : null,
       choices: [
         { id: 'A', text: row.choiceA },
         { id: 'B', text: row.choiceB },
@@ -201,21 +200,18 @@ app.post('/api/questions', requireStaffAuth, upload.single('image'), async (req,
       return res.status(400).json({ error: 'A valid correct answer must be selected.' });
     }
 
-    let imageData = null;
     let imagePath = null;
     if (req.file) {
-      const mimeType = req.file.mimetype;
-      const b64 = req.file.buffer.toString('base64');
-      imageData = `data:${mimeType};base64,${b64}`;
+      imagePath = req.file.filename;
     } else if (existingImagePath && removeImage !== 'true') {
       imagePath = existingImagePath;
     }
 
     const id = crypto.randomUUID();
     await db.execute({
-      sql: `INSERT INTO questions (id, examType, questionText, imagePath, imageData, choiceA, choiceB, choiceC, choiceD, correctChoiceId, createdAt)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      args: [id, examType, questionText.trim(), imagePath, imageData, choiceA.trim(), choiceB.trim(), choiceC.trim(), choiceD.trim(), correctChoiceId, new Date().toISOString()]
+      sql: `INSERT INTO questions (id, examType, questionText, imagePath, choiceA, choiceB, choiceC, choiceD, correctChoiceId, createdAt)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      args: [id, examType, questionText.trim(), imagePath, choiceA.trim(), choiceB.trim(), choiceC.trim(), choiceD.trim(), correctChoiceId, new Date().toISOString()]
     });
 
     const row = await db.execute({ sql: 'SELECT * FROM questions WHERE id = ?', args: [id] });
@@ -240,21 +236,18 @@ app.put('/api/questions/:id', requireStaffAuth, upload.single('image'), async (r
       return res.status(400).json({ error: 'A valid correct answer must be selected.' });
     }
 
-    let imageData = existing.imageData || null;
-    let imagePath = existing.imagePath || null;
+    let imagePath = existing.imagePath;
     if (req.file) {
-      const mimeType = req.file.mimetype;
-      const b64 = req.file.buffer.toString('base64');
-      imageData = `data:${mimeType};base64,${b64}`;
-      imagePath = null; // new upload replaces any legacy path
+      if (existing.imagePath) fs.unlink(path.join(IMAGES_DIR, existing.imagePath), () => {});
+      imagePath = req.file.filename;
     } else if (removeImage === 'true') {
-      imageData = null;
+      if (existing.imagePath) fs.unlink(path.join(IMAGES_DIR, existing.imagePath), () => {});
       imagePath = null;
     }
 
     await db.execute({
-      sql: `UPDATE questions SET questionText = ?, imagePath = ?, imageData = ?, choiceA = ?, choiceB = ?, choiceC = ?, choiceD = ?, correctChoiceId = ? WHERE id = ?`,
-      args: [questionText.trim(), imagePath, imageData, choiceA.trim(), choiceB.trim(), choiceC.trim(), choiceD.trim(), correctChoiceId, req.params.id]
+      sql: `UPDATE questions SET questionText = ?, imagePath = ?, choiceA = ?, choiceB = ?, choiceC = ?, choiceD = ?, correctChoiceId = ? WHERE id = ?`,
+      args: [questionText.trim(), imagePath, choiceA.trim(), choiceB.trim(), choiceC.trim(), choiceD.trim(), correctChoiceId, req.params.id]
     });
 
     const row = await db.execute({ sql: 'SELECT * FROM questions WHERE id = ?', args: [req.params.id] });
@@ -270,6 +263,7 @@ app.delete('/api/questions/:id', requireStaffAuth, async (req, res) => {
     const existingResult = await db.execute({ sql: 'SELECT * FROM questions WHERE id = ?', args: [req.params.id] });
     const existing = existingResult.rows[0];
     if (!existing) return res.status(404).json({ error: 'Question not found.' });
+    if (existing.imagePath) fs.unlink(path.join(IMAGES_DIR, existing.imagePath), () => {});
     await db.execute({ sql: 'DELETE FROM questions WHERE id = ?', args: [req.params.id] });
     res.json({ ok: true });
   } catch (error) {
