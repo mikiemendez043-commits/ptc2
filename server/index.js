@@ -194,7 +194,6 @@ app.post('/api/questions', requireStaffAuth, upload.single('image'), async (req,
     if (!questionText || !choiceA || !choiceB || !choiceC || !choiceD) {
       return res.status(400).json({ error: 'Question text and all four choices are required.' });
     }
-    }
     if (!['A', 'B', 'C', 'D'].includes(correctChoiceId)) {
       return res.status(400).json({ error: 'A valid correct answer must be selected.' });
     }
