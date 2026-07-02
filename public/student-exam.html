@@ -134,6 +134,7 @@
     let QUALIFICATIONS = [];
     let selectedExamType = null;
     let selectedQuestions = []; // public shape: no correctChoiceId (server scores it)
+    let shuffledQuestions = []; // shuffled copy shown to student
     let studentInfo = null;
     let redemptionToken = null;
     let examDeadline = null;
@@ -171,6 +172,15 @@
       });
     }
 
+    function shuffleArray(arr) {
+      const a = [...arr];
+      for (let i = a.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [a[i], a[j]] = [a[j], a[i]];
+      }
+      return a;
+    }
+
     async function selectExamType(type) {
       selectedExamType = type;
       try {
@@ -178,6 +188,11 @@
       } catch (error) {
         selectedQuestions = [];
       }
+      // Shuffle questions and choices for each student
+      shuffledQuestions = shuffleArray(selectedQuestions).map(q => ({
+        ...q,
+        choices: shuffleArray(q.choices)
+      }));
       if (!selectedQuestions.length) {
         examStatus.textContent = 'No questions available';
         examStatus.className = 'status-pill status-warning';
@@ -282,7 +297,7 @@
     }
 
     function renderExamQuestions() {
-      questionContainer.innerHTML = selectedQuestions.map((question, index) => `
+      questionContainer.innerHTML = shuffledQuestions.map((question, index) => `
         <article class="question-card">
           <div class="flex-gap-center" style="justify-content: space-between; gap: 1rem;">
             <h3>Question ${index + 1} of ${selectedQuestions.length}</h3>
@@ -307,19 +322,30 @@
     }
 
     function updateAnsweredCount() {
-      const answered = selectedQuestions.reduce((count, question) => {
+      const answered = shuffledQuestions.reduce((count, question) => {
         return count + (questionContainer.querySelector(`input[name="answer-${question.id}"]:checked`) ? 1 : 0);
       }, 0);
-      answeredCountText.textContent = `${answered} of ${selectedQuestions.length} answered`;
+      answeredCountText.textContent = `${answered} of ${shuffledQuestions.length} answered`;
       examProgressText.textContent = `Complete all items before submitting, or submit early with confirmation.`;
     }
 
     async function submitExam(options = {}) {
       const isAuto = Boolean(options.auto);
-      const answers = selectedQuestions.map(question => ({
-        questionId: question.id,
-        selectedChoice: (questionContainer.querySelector(`input[name="answer-${question.id}"]:checked`) || {}).value || null
-      }));
+      const answers = shuffledQuestions.map(question => {
+        const checkedInput = questionContainer.querySelector(`input[name="answer-${question.id}"]:checked`);
+        const shuffledChoiceId = checkedInput ? checkedInput.value : null;
+        // Map shuffled choice back to original choice ID using choice text
+        let originalChoiceId = null;
+        if (shuffledChoiceId) {
+          const shuffledChoice = question.choices.find(c => c.id === shuffledChoiceId);
+          if (shuffledChoice) {
+            const originalQuestion = selectedQuestions.find(q => q.id === question.id);
+            const originalChoice = originalQuestion && originalQuestion.choices.find(c => c.text === shuffledChoice.text);
+            originalChoiceId = originalChoice ? originalChoice.id : shuffledChoiceId;
+          }
+        }
+        return { questionId: question.id, selectedChoice: originalChoiceId };
+      });
       const unanswered = answers.filter(item => !item.selectedChoice).length;
       if (!isAuto && unanswered > 0) {
         const confirmSubmit = confirm(`You have ${unanswered} unanswered question${unanswered === 1 ? '' : 's'}. Submit anyway?`);
