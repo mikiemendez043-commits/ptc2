@@ -182,7 +182,10 @@ function buildAnswerDetails(questionRows, answers) {
     return {
       questionId: row.id,
       questionText: row.questionText,
-      imageUrl: row.imageData ? row.imageData : (row.imagePath ? `/exam-images/${row.imagePath}` : null),
+      // NOTE: image data is intentionally NOT stored here. It used to embed the full
+      // base64 imageUrl for every question on every submission, which is what was
+      // crashing the server's memory when staff loaded the results list. Nothing
+      // client-side reads answers[].imageUrl anymore, so it's safe to omit.
       choices: [
         { id: 'A', text: row.choiceA },
         { id: 'B', text: row.choiceB },
@@ -194,6 +197,32 @@ function buildAnswerDetails(questionRows, answers) {
       isCorrect: selectedChoice === row.correctChoiceId
     };
   });
+}
+
+// Lightweight question mapper used for list views (student exam, question bank list).
+// Never carries the base64 imageData in the payload — the client is instead given a
+// URL to a dedicated image endpoint, so the bytes stream separately and are never
+// held in the main JSON response or accumulated across multiple questions.
+function rowToQuestionLite(row) {
+  return {
+    id: row.id,
+    examType: row.examType,
+    questionText: row.questionText,
+    imageUrl: row.hasImage ? `/api/questions/${row.id}/image` : null,
+    choices: [
+      { id: 'A', text: row.choiceA },
+      { id: 'B', text: row.choiceB },
+      { id: 'C', text: row.choiceC },
+      { id: 'D', text: row.choiceD }
+    ],
+    correctChoiceId: row.correctChoiceId
+  };
+}
+
+function rowToQuestionLitePublic(row) {
+  const q = rowToQuestionLite(row);
+  delete q.correctChoiceId;
+  return q;
 }
 
 const CODE_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
@@ -222,15 +251,51 @@ app.get('/api/questions', async (req, res) => {
     if (!EXAM_TYPES.includes(examType)) {
       return res.status(400).json({ error: 'Invalid or missing examType.' });
     }
+    // Deliberately excludes imageData/imagePath from the SELECT — those columns can
+    // hold large base64 strings, and pulling them for every question on every list
+    // load is what was exhausting Render's 512MB memory limit. hasImage is a cheap
+    // boolean computed in SQL so the client still knows whether to request an image.
     const result = await db.execute({
-      sql: 'SELECT * FROM questions WHERE examType = ? ORDER BY createdAt ASC',
+      sql: `SELECT id, examType, questionText, choiceA, choiceB, choiceC, choiceD, correctChoiceId, createdAt,
+              CASE WHEN imageData IS NOT NULL OR imagePath IS NOT NULL THEN 1 ELSE 0 END AS hasImage
+            FROM questions WHERE examType = ? ORDER BY createdAt ASC`,
       args: [examType]
     });
     const includeAnswers = Boolean(req.session && req.session.isStaff);
-    res.json(result.rows.map(includeAnswers ? rowToQuestion : rowToQuestionPublic));
+    res.json(result.rows.map(includeAnswers ? rowToQuestionLite : rowToQuestionLitePublic));
   } catch (error) {
     console.error('Failed to get questions:', error);
     res.status(500).json({ error: 'Failed to load questions.' });
+  }
+});
+
+// Serves a single question's image on demand. This is the endpoint referenced by
+// the imageUrl the list route now returns, instead of embedding base64 directly.
+app.get('/api/questions/:id/image', async (req, res) => {
+  try {
+    const result = await db.execute({
+      sql: 'SELECT imageData, imagePath FROM questions WHERE id = ?',
+      args: [req.params.id]
+    });
+    const row = result.rows[0];
+    if (!row) return res.status(404).end();
+
+    if (row.imageData) {
+      const match = /^data:([^;]+);base64,(.+)$/.exec(row.imageData);
+      if (!match) return res.status(404).end();
+      const [, mimeType, base64Payload] = match;
+      const buffer = Buffer.from(base64Payload, 'base64');
+      res.set('Content-Type', mimeType);
+      res.set('Cache-Control', 'public, max-age=86400');
+      return res.send(buffer);
+    }
+    if (row.imagePath) {
+      return res.redirect(`/exam-images/${row.imagePath}`);
+    }
+    return res.status(404).end();
+  } catch (error) {
+    console.error('Failed to serve question image:', error);
+    res.status(500).end();
   }
 });
 
@@ -488,7 +553,7 @@ app.post('/api/exams/:examType/submit', async (req, res) => {
       return res.status(409).json({ error: `You have already completed the ${examType} exam. Only one attempt is allowed per exam.` });
     }
 
-    const questionRows = await db.execute({ sql: 'SELECT * FROM questions WHERE examType = ?', args: [examType] });
+    const questionRows = await db.execute({ sql: 'SELECT id, questionText, choiceA, choiceB, choiceC, choiceD, correctChoiceId FROM questions WHERE examType = ?', args: [examType] });
     if (!questionRows.rows.length) return res.status(400).json({ error: 'This exam has no questions yet.' });
 
     const answerDetails = buildAnswerDetails(questionRows.rows, answers);
@@ -593,7 +658,7 @@ app.put('/api/results/:id', requireStaffAuth, async (req, res) => {
       return res.status(409).json({ error: 'Another result already exists for this student and qualification.' });
     }
 
-    const questionRows = await db.execute({ sql: 'SELECT * FROM questions WHERE examType = ?', args: [existing.examType] });
+    const questionRows = await db.execute({ sql: 'SELECT id, questionText, choiceA, choiceB, choiceC, choiceD, correctChoiceId FROM questions WHERE examType = ?', args: [existing.examType] });
     if (!questionRows.rows.length) return res.status(400).json({ error: 'This exam has no questions yet.' });
 
     const answerDetails = buildAnswerDetails(questionRows.rows, answers);
