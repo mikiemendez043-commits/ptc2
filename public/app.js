@@ -267,3 +267,39 @@ async function requireStaffSession() {
   }
   return true;
 }
+// ---------------------------------------------------------------------------
+// Loading spinner helpers
+// ---------------------------------------------------------------------------
+(function() {
+  const overlay = document.createElement('div');
+  overlay.className = 'spinner-overlay';
+  overlay.id = 'globalSpinner';
+  overlay.innerHTML = '<div class="spinner-ring"></div><span class="spinner-label" id="spinnerLabel">Loading...</span>';
+  document.addEventListener('DOMContentLoaded', () => document.body.appendChild(overlay));
+})();
+
+function showSpinner(label = 'Loading...') {
+  const overlay = document.getElementById('globalSpinner');
+  const labelEl = document.getElementById('spinnerLabel');
+  if (overlay) { overlay.classList.add('active'); }
+  if (labelEl) { labelEl.textContent = label; }
+}
+
+function hideSpinner() {
+  const overlay = document.getElementById('globalSpinner');
+  if (overlay) overlay.classList.remove('active');
+}
+
+function setButtonLoading(btn, loading, originalText) {
+  if (!btn) return;
+  if (loading) {
+    btn.dataset.originalText = btn.textContent;
+    btn.classList.add('loading');
+    btn.disabled = true;
+    if (originalText) btn.textContent = originalText;
+  } else {
+    btn.classList.remove('loading');
+    btn.disabled = false;
+    btn.textContent = btn.dataset.originalText || btn.textContent;
+  }
+}

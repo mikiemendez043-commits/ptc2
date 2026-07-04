@@ -34,6 +34,7 @@
     const logoutButton = document.getElementById('logoutButton');
 
     async function renderDashboard() {
+      showSpinner('Loading dashboard...');
       try {
         const summary = await api.getDashboardSummary();
         dashboardCards.innerHTML = summary.map(item => {
@@ -53,10 +54,13 @@
         }).join('');
       } catch (error) {
         dashboardCards.innerHTML = `<p class="inline-note">Failed to load dashboard: ${error.message}</p>`;
+      } finally {
+        hideSpinner();
       }
     }
 
     logoutButton.addEventListener('click', async () => {
+      showSpinner('Logging out...');
       await api.logout();
       window.location.href = 'staff-login.html';
     });

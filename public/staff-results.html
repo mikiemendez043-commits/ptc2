@@ -349,12 +349,15 @@
           if (action === 'delete') {
             const confirmed = window.confirm('Delete this student result permanently?');
             if (!confirmed) return;
+            showSpinner('Deleting...');
             try {
               await api.deleteResult(id);
               allResults = allResults.filter(item => item.id !== id);
               renderSummary();
             } catch (error) {
               alert(error.message);
+            } finally {
+              hideSpinner();
             }
             return;
           }
@@ -440,13 +443,16 @@
     (async function init() {
       const ok = await requireStaffSession();
       if (!ok) return;
+      showSpinner('Loading results...');
       try {
         allResults = await api.getResults(examType);
       } catch (error) {
         resultsTable.innerHTML = `<p class="inline-note">Failed to load results: ${error.message}</p>`;
+        hideSpinner();
         return;
       }
       renderSummary();
+      hideSpinner();
     })();
   </script>
 </body>

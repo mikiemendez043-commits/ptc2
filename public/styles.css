@@ -768,3 +768,72 @@ p {
   color: #ffffff !important;
   border-color: var(--primary) !important;
 }
+/* ── Loading Spinner ─────────────────────────────────────────────────────── */
+.spinner-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 999;
+  background: rgba(245, 246, 248, 0.85);
+  backdrop-filter: blur(4px);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 1rem;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.2s ease;
+}
+.spinner-overlay.active {
+  opacity: 1;
+  pointer-events: all;
+}
+.spinner-ring {
+  width: 48px;
+  height: 48px;
+  border: 4px solid rgba(22, 78, 99, 0.15);
+  border-top-color: var(--primary);
+  border-radius: 50%;
+  animation: spin 0.75s linear infinite;
+}
+.spinner-label {
+  font-size: 0.95rem;
+  font-weight: 600;
+  color: var(--text-muted);
+}
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+.skeleton {
+  background: linear-gradient(90deg, #e2e8f0 25%, #f1f5f9 50%, #e2e8f0 75%);
+  background-size: 200% 100%;
+  animation: shimmer 1.4s infinite;
+  border-radius: 8px;
+}
+@keyframes shimmer {
+  0% { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}
+.button.loading {
+  opacity: 0.75;
+  pointer-events: none;
+  position: relative;
+}
+.button.loading::after {
+  content: '';
+  position: absolute;
+  right: 1rem;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 14px;
+  height: 14px;
+  border: 2px solid rgba(255,255,255,0.4);
+  border-top-color: #fff;
+  border-radius: 50%;
+  animation: spin 0.7s linear infinite;
+}
+.skeleton-row {
+  height: 20px;
+  margin-bottom: 0.75rem;
+  border-radius: 6px;
+}

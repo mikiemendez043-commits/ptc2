@@ -131,10 +131,12 @@
     async function refreshPage() {
       builderTitle.textContent = editingQuestionId ? `Edit Question (${activeExamType})` : `Add Question (${activeExamType})`;
       questionList.innerHTML = '<p class="inline-note">Loading...</p>';
+      showSpinner('Loading questions...');
       try {
         currentQuestions = await api.getQuestions(activeExamType);
       } catch (error) {
         questionList.innerHTML = `<p class="inline-note">Failed to load questions: ${error.message}</p>`;
+        hideSpinner();
         return;
       }
       const required = requiredCountFor(activeExamType);
@@ -143,6 +145,7 @@
       completionStatus.className = currentQuestions.length >= required ? 'status-success' : 'status-warning';
       questionList.innerHTML = currentQuestions.length ? currentQuestions.map(renderQuestionItem).join('') : '<p class="inline-note">No questions added yet for this exam type.</p>';
       attachQuestionActions();
+      hideSpinner();
     }
 
     function renderQuestionItem(question) {
@@ -278,11 +281,13 @@
         formData.append('existingImagePath', editingExistingImageUrl.replace('/exam-images/', ''));
       }
 
+      showSpinner('Saving question...');
       try {
         await api.saveQuestion(formData, editingQuestionId);
         clearForm();
         refreshPage();
       } catch (error) {
+        hideSpinner();
         formError.textContent = error.message;
         formError.className = 'alert-box';
       }

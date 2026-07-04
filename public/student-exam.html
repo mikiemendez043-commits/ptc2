@@ -183,11 +183,13 @@
 
     async function selectExamType(type) {
       selectedExamType = type;
+      showSpinner('Loading exam questions...');
       try {
         selectedQuestions = await api.getQuestions(type);
       } catch (error) {
         selectedQuestions = [];
       }
+      hideSpinner();
       // Shuffle questions and choices for each student
       shuffledQuestions = shuffleArray(selectedQuestions).map(q => ({
         ...q,
@@ -356,6 +358,7 @@
       submitExamButton.disabled = true;
       submitExamButton.textContent = isAuto ? 'Time expired — submitting...' : 'Submitting...';
       examSubmitWarning.innerHTML = '';
+      showSpinner('Submitting your exam...');
 
       try {
         // Score is computed server-side from the real answer key - the client never sees or sends a score.
@@ -367,8 +370,10 @@
           answers,
           redemptionToken
         });
+        hideSpinner();
         showResult(result, isAuto);
       } catch (error) {
+        hideSpinner();
         examSubmitWarning.innerHTML = `<div class="alert-box">${error.message}</div>`;
         submitExamButton.disabled = false;
         submitExamButton.textContent = 'Submit Exam';
@@ -397,6 +402,7 @@
       const submitButton = accessCodeForm.querySelector('button[type="submit"]');
       submitButton.disabled = true;
       submitButton.textContent = 'Checking...';
+      showSpinner('Validating access code...');
       try {
         const result = await api.redeemAccessCode(code);
         redemptionToken = result.redemptionToken;
@@ -408,6 +414,7 @@
         accessCodeWarning.textContent = error.message;
         accessCodeWarning.className = 'alert-box';
       } finally {
+        hideSpinner();
         submitButton.disabled = false;
         submitButton.textContent = 'Continue';
       }

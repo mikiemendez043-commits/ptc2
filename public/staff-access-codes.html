@@ -143,6 +143,7 @@
       event.preventDefault();
       generateError.textContent = '';
       const count = Number(codeCountInput.value);
+      showSpinner('Generating codes...');
       try {
         const batch = await api.generateAccessCodes(count);
         lastGeneratedCodes = batch.codes;
@@ -154,6 +155,8 @@
       } catch (error) {
         generateError.textContent = error.message;
         generateError.className = 'alert-box';
+      } finally {
+        hideSpinner();
       }
     });
 
@@ -172,6 +175,7 @@
     });
 
     async function loadBatches() {
+      showSpinner('Loading batches...');
       try {
         const batches = await api.getAccessCodeBatches();
         if (!batches.length) {
@@ -230,6 +234,8 @@
         });
       } catch (error) {
         batchList.innerHTML = `<p class="inline-note">Failed to load batches: ${error.message}</p>`;
+      } finally {
+        hideSpinner();
       }
     }
 
