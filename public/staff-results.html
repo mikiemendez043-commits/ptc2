@@ -312,13 +312,6 @@
                 </svg>
               </button>
               <div class="row-menu-dropdown" data-menu-dropdown data-id="${item.id}">
-                <button class="row-menu-item" type="button" data-action="review" data-id="${item.id}">
-                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-                    <path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7-11-7-11-7Z" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/>
-                    <circle cx="12" cy="12" r="3" stroke="currentColor" stroke-width="1.8"/>
-                  </svg>
-                  Review
-                </button>
                 <button class="row-menu-item" type="button" data-action="edit" data-id="${item.id}">
                   <svg width="16" height="16" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
                     <path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5Z" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/>
@@ -389,9 +382,7 @@
           }
           if (action === 'edit') {
             await openEditor(id);
-            return;
           }
-          await openReview(id);
         });
       });
     }
@@ -405,10 +396,6 @@
     document.addEventListener('keydown', event => {
       if (event.key === 'Escape') closeAllMenus();
     });
-
-    function openReview(resultId) {
-      window.location.href = `staff-review-result.html?id=${resultId}`;
-    }
 
     async function openEditor(resultId) {
       const result = allResults.find(item => item.id === resultId);
