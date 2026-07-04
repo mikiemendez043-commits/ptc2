@@ -34,13 +34,22 @@ function createSessionToken() {
   return crypto.randomBytes(32).toString('hex');
 }
 
-// Middleware to attach session to req (async — reads from Turso)
+// Middleware to attach session to req (cached in memory, backed by Turso)
 app.use(require('cookie-parser')());
+const sessionCache = new Map(); // token -> { isStaff, expiresAt }
+
 app.use(async (req, res, next) => {
   const token = req.cookies && req.cookies['staff_token'];
   req.sessionToken = token || null;
   req.session = {};
   if (token) {
+    // Check memory cache first
+    const cached = sessionCache.get(token);
+    if (cached && Date.now() < cached.expiresAt) {
+      req.session = { isStaff: cached.isStaff };
+      return next();
+    }
+    // Fall back to Turso
     try {
       const now = new Date().toISOString();
       const result = await db.execute({
@@ -48,11 +57,11 @@ app.use(async (req, res, next) => {
         args: [token, now]
       });
       if (result.rows[0]) {
-        req.session = { isStaff: Boolean(result.rows[0].isStaff) };
+        const sess = { isStaff: Boolean(result.rows[0].isStaff), expiresAt: new Date(result.rows[0].expiresAt).getTime() };
+        sessionCache.set(token, sess);
+        req.session = { isStaff: sess.isStaff };
       }
-    } catch (e) {
-      // session lookup failed — treat as unauthenticated
-    }
+    } catch (e) {}
   }
   next();
 });
@@ -90,6 +99,7 @@ app.post('/api/login', async (req, res) => {
       sql: 'INSERT INTO sessions (token, isStaff, expiresAt, createdAt) VALUES (?, ?, ?, ?)',
       args: [token, 1, expiresAt, createdAt]
     });
+    sessionCache.set(token, { isStaff: true, expiresAt: Date.now() + SESSION_DURATION_MS });
     res.cookie('staff_token', token, { httpOnly: true, maxAge: SESSION_DURATION_MS, sameSite: 'lax' });
     return res.json({ ok: true });
   }
@@ -98,6 +108,7 @@ app.post('/api/login', async (req, res) => {
 
 app.post('/api/logout', async (req, res) => {
   if (req.sessionToken) {
+    sessionCache.delete(req.sessionToken);
     try {
       await db.execute({ sql: 'DELETE FROM sessions WHERE token = ?', args: [req.sessionToken] });
     } catch (e) {}

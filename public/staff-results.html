@@ -18,19 +18,21 @@
 
     <section class="panel-card" style="margin-bottom: 1.5rem;">
       <div class="toolbar">
-        <div></div>
+        <div class="flex-gap-center">
+          <div class="form-field" style="margin:0;">
+            <select id="monthSelect" class="search-input" style="width:auto; font-size:0.88rem; padding:6px 10px;"></select>
+          </div>
+          <div class="form-field" style="margin:0;">
+            <select id="yearSelect" class="search-input" style="width:auto; font-size:0.88rem; padding:6px 10px;"></select>
+          </div>
+        </div>
         <button id="exportCsv" class="button button-secondary" type="button">Export CSV</button>
       </div>
       <div class="grid-columns grid-2" style="align-items: start; gap: 1.5rem;">
         <div class="card" style="padding: 1rem;">
           <div style="display:flex; align-items:center; justify-content:space-between; gap:0.75rem;">
             <h2 style="margin:0;">Rating distribution</h2>
-            <select id="periodToggle" class="search-input" style="width:auto; font-size:0.82rem; padding:3px 8px;">
-              <option value="day">Day</option>
-              <option value="week">Week</option>
-              <option value="month" selected>Month</option>
-              <option value="year">Year</option>
-            </select>
+            <span id="periodLabel" style="font-size:0.85rem; color:var(--text-muted); font-weight:600;"></span>
           </div>
           <div style="display:flex; align-items:center; gap:1.25rem; flex-wrap:wrap; margin-top:0.75rem;">
             <canvas id="ratingChart" width="240" height="240" style="width:180px; height:180px; flex-shrink:0;"></canvas>
@@ -59,7 +61,9 @@
   <script src="app.js"></script>
   <script>
     const ratingChart = document.getElementById('ratingChart');
-    const periodToggle = document.getElementById('periodToggle');
+    const monthSelect = document.getElementById('monthSelect');
+    const yearSelect = document.getElementById('yearSelect');
+    const periodLabel = document.getElementById('periodLabel');
     const summaryText = document.getElementById('summaryText');
     const searchBox = document.getElementById('searchBox');
     const resultsTable = document.getElementById('resultsTable');
@@ -67,8 +71,9 @@
     const exportCsv = document.getElementById('exportCsv');
     const examType = getQueryParam('type') || 'OLT01';
     let allResults = [];
-    let activeMode = 'month';
     let searchTerm = '';
+
+    const MONTHS = ['January','February','March','April','May','June','July','August','September','October','November','December'];
 
     // ── Rating legend colour map ──────────────────────────────────────────────
     const RATING_LEGEND = [
@@ -80,13 +85,35 @@
       { label: 'Excellent',  color: '#16a34a' },
     ];
 
-    periodToggle.addEventListener('change', () => {
-      activeMode = periodToggle.value;
-      renderSummary();
-    });
+    function initSelectors() {
+      const now = new Date();
+      const currentMonth = now.getMonth();
+      const currentYear = now.getFullYear();
+
+      monthSelect.innerHTML = MONTHS.map((m, i) =>
+        `<option value="${i}" ${i === currentMonth ? 'selected' : ''}>${m}</option>`
+      ).join('');
+
+      const years = [];
+      for (let y = currentYear; y >= currentYear - 5; y--) years.push(y);
+      yearSelect.innerHTML = years.map(y =>
+        `<option value="${y}" ${y === currentYear ? 'selected' : ''}>${y}</option>`
+      ).join('');
+    }
+
+    function getSelectedPeriod() {
+      return { month: parseInt(monthSelect.value), year: parseInt(yearSelect.value) };
+    }
+
+    monthSelect.addEventListener('change', renderSummary);
+    yearSelect.addEventListener('change', renderSummary);
 
     function getFilteredResults() {
-      const periodResults = getPeriodFilter(allResults, activeMode);
+      const { month, year } = getSelectedPeriod();
+      const periodResults = allResults.filter(item => {
+        const d = new Date(item.dateTaken);
+        return d.getFullYear() === year && d.getMonth() === month;
+      });
       if (!searchTerm) return periodResults;
       const lower = searchTerm.toLowerCase();
       return periodResults.filter(item =>
@@ -106,12 +133,14 @@
       const slices = drawRatingPieChart(ratingChart, filtered);
       renderChartLegend(filtered);
       renderTestDetailSummary(filtered);
-      const periodLabel = getPeriodLabel(activeMode);
+      const { month, year } = getSelectedPeriod();
+      const pLabel = `${MONTHS[month]} ${year}`;
+      if (periodLabel) periodLabel.textContent = pLabel;
       const total = filtered.length;
       const average = total ? (filtered.reduce((sum, item) => sum + item.score, 0) / total).toFixed(1) : '0.0';
       const topRating = getMostCommonRating(filtered);
       const commonText = topRating ? `${topRating[0]} (${topRating[1]} student${topRating[1] === 1 ? '' : 's'})` : 'No results';
-      summaryText.textContent = `${total} student${total === 1 ? '' : 's'} took ${examType} in ${periodLabel}. Average score: ${average}/${requiredCountFor(examType)}. Most common rating: ${commonText}.`;
+      summaryText.textContent = `${total} student${total === 1 ? '' : 's'} took ${examType} in ${pLabel}. Average score: ${average}/${requiredCountFor(examType)}. Most common rating: ${commonText}.`;
       resultCount.textContent = `${filtered.length} record${filtered.length === 1 ? '' : 's'}`;
       renderTable(filtered);
     }
@@ -349,15 +378,12 @@
           if (action === 'delete') {
             const confirmed = window.confirm('Delete this student result permanently?');
             if (!confirmed) return;
-            showSpinner('Deleting...');
             try {
               await api.deleteResult(id);
               allResults = allResults.filter(item => item.id !== id);
               renderSummary();
             } catch (error) {
               alert(error.message);
-            } finally {
-              hideSpinner();
             }
             return;
           }
@@ -443,16 +469,13 @@
     (async function init() {
       const ok = await requireStaffSession();
       if (!ok) return;
-      showSpinner('Loading results...');
       try {
         allResults = await api.getResults(examType);
       } catch (error) {
         resultsTable.innerHTML = `<p class="inline-note">Failed to load results: ${error.message}</p>`;
-        hideSpinner();
         return;
       }
       renderSummary();
-      hideSpinner();
     })();
   </script>
 </body>
