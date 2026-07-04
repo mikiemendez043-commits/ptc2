@@ -26,29 +26,34 @@ const EXAM_DURATION_MS = 60 * 60 * 1000;
 app.use(express.json({ limit: '20mb' }));
 
 // ---------------------------------------------------------------------------
-// Simple token-based auth (replaces express-session so restarts don't log out staff)
+// Token-based auth stored in Turso — survives server restarts
 // ---------------------------------------------------------------------------
-const SESSION_SECRET = process.env.SESSION_SECRET || 'change-this-secret-before-deploying';
-const activeSessions = new Map(); // token -> { isStaff, expiresAt }
+const SESSION_DURATION_MS = 1000 * 60 * 60 * 8; // 8 hours
 
 function createSessionToken() {
   return crypto.randomBytes(32).toString('hex');
 }
 
-function getSession(req) {
-  const token = req.cookies && req.cookies['staff_token'];
-  if (!token) return null;
-  const sess = activeSessions.get(token);
-  if (!sess) return null;
-  if (Date.now() > sess.expiresAt) { activeSessions.delete(token); return null; }
-  return sess;
-}
-
-// Middleware to attach session to req
+// Middleware to attach session to req (async — reads from Turso)
 app.use(require('cookie-parser')());
-app.use((req, res, next) => {
-  req.session = getSession(req) || {};
-  req.sessionToken = req.cookies && req.cookies['staff_token'];
+app.use(async (req, res, next) => {
+  const token = req.cookies && req.cookies['staff_token'];
+  req.sessionToken = token || null;
+  req.session = {};
+  if (token) {
+    try {
+      const now = new Date().toISOString();
+      const result = await db.execute({
+        sql: 'SELECT * FROM sessions WHERE token = ? AND expiresAt > ?',
+        args: [token, now]
+      });
+      if (result.rows[0]) {
+        req.session = { isStaff: Boolean(result.rows[0].isStaff) };
+      }
+    } catch (e) {
+      // session lookup failed — treat as unauthenticated
+    }
+  }
   next();
 });
 
@@ -75,19 +80,28 @@ app.get('/api/config', (req, res) => {
 // ---------------------------------------------------------------------------
 // Auth
 // ---------------------------------------------------------------------------
-app.post('/api/login', (req, res) => {
+app.post('/api/login', async (req, res) => {
   const { username, password } = req.body || {};
   if (username === STAFF_USERNAME && password === STAFF_PASSWORD) {
     const token = createSessionToken();
-    activeSessions.set(token, { isStaff: true, expiresAt: Date.now() + 1000 * 60 * 60 * 8 });
-    res.cookie('staff_token', token, { httpOnly: true, maxAge: 1000 * 60 * 60 * 8, sameSite: 'lax' });
+    const expiresAt = new Date(Date.now() + SESSION_DURATION_MS).toISOString();
+    const createdAt = new Date().toISOString();
+    await db.execute({
+      sql: 'INSERT INTO sessions (token, isStaff, expiresAt, createdAt) VALUES (?, ?, ?, ?)',
+      args: [token, 1, expiresAt, createdAt]
+    });
+    res.cookie('staff_token', token, { httpOnly: true, maxAge: SESSION_DURATION_MS, sameSite: 'lax' });
     return res.json({ ok: true });
   }
   res.status(401).json({ error: 'Invalid username or password.' });
 });
 
-app.post('/api/logout', (req, res) => {
-  if (req.sessionToken) activeSessions.delete(req.sessionToken);
+app.post('/api/logout', async (req, res) => {
+  if (req.sessionToken) {
+    try {
+      await db.execute({ sql: 'DELETE FROM sessions WHERE token = ?', args: [req.sessionToken] });
+    } catch (e) {}
+  }
   res.clearCookie('staff_token');
   res.json({ ok: true });
 });

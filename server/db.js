@@ -61,6 +61,13 @@ async function initDb() {
     CREATE INDEX IF NOT EXISTS idx_access_codes_batchId ON access_codes(batchId);
     CREATE UNIQUE INDEX IF NOT EXISTS idx_results_unique_attempt
       ON results(examType, studentNameNormalized, qualificationNormalized);
+
+    CREATE TABLE IF NOT EXISTS sessions (
+      token TEXT PRIMARY KEY,
+      isStaff INTEGER NOT NULL DEFAULT 1,
+      expiresAt TEXT NOT NULL,
+      createdAt TEXT NOT NULL
+    );
   `);
 }
 
