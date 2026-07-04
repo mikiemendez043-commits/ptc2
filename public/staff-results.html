@@ -456,6 +456,7 @@
     (async function init() {
       const ok = await requireStaffSession();
       if (!ok) return;
+      initSelectors();
       try {
         allResults = await api.getResults(examType);
       } catch (error) {
