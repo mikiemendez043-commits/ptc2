@@ -24,15 +24,33 @@ const STAFF_PASSWORD = process.env.STAFF_PASSWORD || 'admin123';
 const EXAM_DURATION_MS = 60 * 60 * 1000;
 
 app.use(express.json({ limit: '20mb' }));
-app.use(session({
-  secret: process.env.SESSION_SECRET || 'change-this-secret-before-deploying',
-  resave: false,
-  saveUninitialized: false,
-  cookie: {
-    httpOnly: true,
-    maxAge: 1000 * 60 * 60 * 8
-  }
-}));
+
+// ---------------------------------------------------------------------------
+// Simple token-based auth (replaces express-session so restarts don't log out staff)
+// ---------------------------------------------------------------------------
+const SESSION_SECRET = process.env.SESSION_SECRET || 'change-this-secret-before-deploying';
+const activeSessions = new Map(); // token -> { isStaff, expiresAt }
+
+function createSessionToken() {
+  return crypto.randomBytes(32).toString('hex');
+}
+
+function getSession(req) {
+  const token = req.cookies && req.cookies['staff_token'];
+  if (!token) return null;
+  const sess = activeSessions.get(token);
+  if (!sess) return null;
+  if (Date.now() > sess.expiresAt) { activeSessions.delete(token); return null; }
+  return sess;
+}
+
+// Middleware to attach session to req
+app.use(require('cookie-parser')());
+app.use((req, res, next) => {
+  req.session = getSession(req) || {};
+  req.sessionToken = req.cookies && req.cookies['staff_token'];
+  next();
+});
 
 const upload = multer({
   storage: multer.memoryStorage(),
@@ -60,14 +78,18 @@ app.get('/api/config', (req, res) => {
 app.post('/api/login', (req, res) => {
   const { username, password } = req.body || {};
   if (username === STAFF_USERNAME && password === STAFF_PASSWORD) {
-    req.session.isStaff = true;
+    const token = createSessionToken();
+    activeSessions.set(token, { isStaff: true, expiresAt: Date.now() + 1000 * 60 * 60 * 8 });
+    res.cookie('staff_token', token, { httpOnly: true, maxAge: 1000 * 60 * 60 * 8, sameSite: 'lax' });
     return res.json({ ok: true });
   }
   res.status(401).json({ error: 'Invalid username or password.' });
 });
 
 app.post('/api/logout', (req, res) => {
-  req.session.destroy(() => res.json({ ok: true }));
+  if (req.sessionToken) activeSessions.delete(req.sessionToken);
+  res.clearCookie('staff_token');
+  res.json({ ok: true });
 });
 
 app.get('/api/session', (req, res) => {
