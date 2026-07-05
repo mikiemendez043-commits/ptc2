@@ -71,6 +71,14 @@ async function initDb() {
   `);
 }
 
-initDb().catch(console.error);
+initDb().then(async () => {
+  // Migration: add updatedAt if it doesn't exist yet (older DBs won't have it).
+  // Wrapped in try/catch since SQLite errors if the column already exists.
+  try {
+    await db.execute('ALTER TABLE questions ADD COLUMN updatedAt TEXT');
+  } catch (e) {
+    // Column already exists — safe to ignore.
+  }
+}).catch(console.error);
 
 module.exports = { db, IMAGES_DIR };

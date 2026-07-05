@@ -204,11 +204,16 @@ function buildAnswerDetails(questionRows, answers) {
 // URL to a dedicated image endpoint, so the bytes stream separately and are never
 // held in the main JSON response or accumulated across multiple questions.
 function rowToQuestionLite(row) {
+  // The image URL is versioned with updatedAt so that whenever a question's
+  // image actually changes, the URL string itself changes too. Without this,
+  // browsers (and even in-memory tab caches that ignore Cache-Control) keep
+  // reusing the previously loaded image bytes for the same URL.
+  const version = row.updatedAt ? encodeURIComponent(row.updatedAt) : '';
   return {
     id: row.id,
     examType: row.examType,
     questionText: row.questionText,
-    imageUrl: row.hasImage ? `/api/questions/${row.id}/image` : null,
+    imageUrl: row.hasImage ? `/api/questions/${row.id}/image${version ? `?v=${version}` : ''}` : null,
     choices: [
       { id: 'A', text: row.choiceA },
       { id: 'B', text: row.choiceB },
@@ -256,7 +261,7 @@ app.get('/api/questions', async (req, res) => {
     // load is what was exhausting Render's 512MB memory limit. hasImage is a cheap
     // boolean computed in SQL so the client still knows whether to request an image.
     const result = await db.execute({
-      sql: `SELECT id, examType, questionText, choiceA, choiceB, choiceC, choiceD, correctChoiceId, createdAt,
+      sql: `SELECT id, examType, questionText, choiceA, choiceB, choiceC, choiceD, correctChoiceId, createdAt, updatedAt,
               CASE WHEN imageData IS NOT NULL OR imagePath IS NOT NULL THEN 1 ELSE 0 END AS hasImage
             FROM questions WHERE examType = ? ORDER BY createdAt ASC`,
       args: [examType]
@@ -322,10 +327,11 @@ app.post('/api/questions', requireStaffAuth, upload.single('image'), async (req,
     }
 
     const id = crypto.randomUUID();
+    const nowIso = new Date().toISOString();
     await db.execute({
-      sql: `INSERT INTO questions (id, examType, questionText, imagePath, imageData, choiceA, choiceB, choiceC, choiceD, correctChoiceId, createdAt)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      args: [id, examType, questionText.trim(), imagePath, imageData, choiceA.trim(), choiceB.trim(), choiceC.trim(), choiceD.trim(), correctChoiceId, new Date().toISOString()]
+      sql: `INSERT INTO questions (id, examType, questionText, imagePath, imageData, choiceA, choiceB, choiceC, choiceD, correctChoiceId, createdAt, updatedAt)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      args: [id, examType, questionText.trim(), imagePath, imageData, choiceA.trim(), choiceB.trim(), choiceC.trim(), choiceD.trim(), correctChoiceId, nowIso, nowIso]
     });
 
     const row = await db.execute({ sql: 'SELECT * FROM questions WHERE id = ?', args: [id] });
@@ -363,8 +369,8 @@ app.put('/api/questions/:id', requireStaffAuth, upload.single('image'), async (r
     }
 
     await db.execute({
-      sql: `UPDATE questions SET questionText = ?, imagePath = ?, imageData = ?, choiceA = ?, choiceB = ?, choiceC = ?, choiceD = ?, correctChoiceId = ? WHERE id = ?`,
-      args: [questionText.trim(), imagePath, imageData, choiceA.trim(), choiceB.trim(), choiceC.trim(), choiceD.trim(), correctChoiceId, req.params.id]
+      sql: `UPDATE questions SET questionText = ?, imagePath = ?, imageData = ?, choiceA = ?, choiceB = ?, choiceC = ?, choiceD = ?, correctChoiceId = ?, updatedAt = ? WHERE id = ?`,
+      args: [questionText.trim(), imagePath, imageData, choiceA.trim(), choiceB.trim(), choiceC.trim(), choiceD.trim(), correctChoiceId, new Date().toISOString(), req.params.id]
     });
 
     const row = await db.execute({ sql: 'SELECT * FROM questions WHERE id = ?', args: [req.params.id] });
