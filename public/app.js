@@ -276,7 +276,6 @@ function renderStaffNav(activeKey) {
   const navLinks = [
     { key: 'dashboard', label: 'Dashboard', href: 'staff-dashboard.html' },
     { key: 'questions', label: 'Question Bank', href: 'staff-exam-builder.html' },
-    { key: 'results', label: 'Results', href: 'staff-results.html' },
     { key: 'codes', label: 'Access Codes', href: 'staff-access-codes.html' },
   ];
 
