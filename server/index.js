@@ -286,7 +286,7 @@ app.get('/api/questions/:id/image', async (req, res) => {
       const [, mimeType, base64Payload] = match;
       const buffer = Buffer.from(base64Payload, 'base64');
       res.set('Content-Type', mimeType);
-      res.set('Cache-Control', 'public, max-age=86400');
+      res.set('Cache-Control', 'no-cache');
       return res.send(buffer);
     }
     if (row.imagePath) {
