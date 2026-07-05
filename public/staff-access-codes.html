@@ -69,7 +69,6 @@
         <p class="eyebrow">Exam Authorization</p>
         <h1>Access Codes</h1>
       </div>
-      <a class="button button-secondary" href="staff-dashboard.html">Back</a>
     </div>
 
     <section class="panel-card" style="margin-bottom: 1.5rem;">
@@ -260,6 +259,7 @@
     (async function init() {
       const ok = await requireStaffSession();
       if (!ok) return;
+      renderStaffNav('codes');
       loadBatches();
     })();
   </script>

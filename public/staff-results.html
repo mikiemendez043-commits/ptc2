@@ -13,7 +13,6 @@
         <p class="eyebrow">Exam Results</p>
         <h1>Student Performance</h1>
       </div>
-      <a class="button button-secondary" href="staff-dashboard.html">Back</a>
     </div>
 
     <section class="panel-card" style="margin-bottom: 1.5rem;">
@@ -456,6 +455,7 @@
     (async function init() {
       const ok = await requireStaffSession();
       if (!ok) return;
+      renderStaffNav('results');
       initSelectors();
       try {
         allResults = await api.getResults(examType);

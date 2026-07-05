@@ -268,8 +268,41 @@ async function requireStaffSession() {
   return true;
 }
 // ---------------------------------------------------------------------------
-// Loading spinner helpers
+// Shared staff navigation bar. Call renderStaffNav('dashboard' | 'questions' |
+// 'results' | 'codes') near the top of a staff page's init to inject it.
+// Centralized here so every page stays in sync without duplicating markup.
 // ---------------------------------------------------------------------------
+function renderStaffNav(activeKey) {
+  const navLinks = [
+    { key: 'dashboard', label: 'Dashboard', href: 'staff-dashboard.html' },
+    { key: 'questions', label: 'Question Bank', href: 'staff-exam-builder.html' },
+    { key: 'results', label: 'Results', href: 'staff-results.html' },
+    { key: 'codes', label: 'Access Codes', href: 'staff-access-codes.html' },
+  ];
+
+  const nav = document.createElement('nav');
+  nav.className = 'staff-nav';
+  nav.innerHTML = `
+    <div class="staff-nav-inner">
+      <a class="staff-nav-brand" href="staff-dashboard.html">PTC-Catanduanes</a>
+      <div class="staff-nav-links">
+        ${navLinks.map(link => `
+          <a class="staff-nav-link ${link.key === activeKey ? 'active' : ''}" href="${link.href}">${link.label}</a>
+        `).join('')}
+      </div>
+      <button class="button button-secondary staff-nav-logout" id="staffNavLogout" type="button">Logout</button>
+    </div>
+  `;
+  document.body.insertBefore(nav, document.body.firstChild);
+
+  document.getElementById('staffNavLogout').addEventListener('click', async () => {
+    showSpinner('Logging out...');
+    await api.logout();
+    window.location.href = 'staff-login.html';
+  });
+}
+
+
 (function() {
   const overlay = document.createElement('div');
   overlay.className = 'spinner-overlay';

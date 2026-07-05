@@ -13,9 +13,6 @@
         <p class="eyebrow">Question Bank</p>
         <h1>Manage Exam Questions</h1>
       </div>
-      <div class="flex-gap-center">
-        <a class="button button-secondary" href="staff-dashboard.html">Back</a>
-      </div>
     </div>
 
     <div class="tab-list" id="examTabs"></div>
@@ -300,6 +297,7 @@
     (async function init() {
       const ok = await requireStaffSession();
       if (!ok) return;
+      renderStaffNav('questions');
       const config = await api.getConfig();
       EXAM_TYPES = config.examTypes;
       const requestedType = getQueryParam('type');

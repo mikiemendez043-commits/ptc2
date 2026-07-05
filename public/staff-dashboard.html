@@ -13,7 +13,6 @@
         <p class="eyebrow">Staff Dashboard</p>
         <h1>Exam Management</h1>
       </div>
-      <button class="button button-secondary" id="logoutButton" type="button">Logout</button>
     </div>
 
     <section class="hero-card" style="margin-bottom: 1.5rem;">
@@ -31,7 +30,6 @@
   <script src="app.js"></script>
   <script>
     const dashboardCards = document.getElementById('dashboardCards');
-    const logoutButton = document.getElementById('logoutButton');
 
     async function renderDashboard() {
       showSpinner('Loading dashboard...');
@@ -59,15 +57,10 @@
       }
     }
 
-    logoutButton.addEventListener('click', async () => {
-      showSpinner('Logging out...');
-      await api.logout();
-      window.location.href = 'staff-login.html';
-    });
-
     (async function init() {
       const ok = await requireStaffSession();
       if (!ok) return;
+      renderStaffNav('dashboard');
       renderDashboard();
     })();
   </script>
