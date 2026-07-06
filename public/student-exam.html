@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Take Exam — PTC-Catanduanes Exam System</title>
+  <title>Take Exam — TCAT</title>
   <link rel="stylesheet" href="styles.css">
 </head>
 <body>
@@ -11,13 +11,13 @@
     <div class="page-header">
       <div>
         <p class="eyebrow">Student Exam</p>
-        <h1>Take Your Exam</h1>
+        <h1>Take Your Exams</h1>
       </div>
     </div>
 
     <section class="panel-card" id="step0Section">
       <h2>Step 1: Enter your access code</h2>
-      <p class="inline-note">Ask your proctor for a one-time access code before starting. Each code can only be used once.</p>
+      <p class="inline-note">Ask your proctor for a one-time access code before starting. Each code can only be used once. You'll take all three exams (OLT01, TLT01, TNT01) in sequence, one at a time.</p>
       <form id="accessCodeForm" style="margin-top: 1.25rem; max-width: 320px;">
         <div class="form-field">
           <label for="accessCodeInput">Access code</label>
@@ -29,13 +29,8 @@
     </section>
 
     <section class="panel-card" id="step1Section" style="display: none; margin-top: 1.5rem;">
-      <h2>Step 2: Choose an exam</h2>
-      <p class="inline-note">Select the exam type you want to take. The item count shown is the number of questions available.</p>
-      <div class="grid-columns grid-3" id="examSelectCards" style="margin-top: 1.5rem;"><p class="inline-note">Loading...</p></div>
-    </section>
-
-    <section class="panel-card" id="step2Section" style="display: none; margin-top: 1.5rem;">
-      <h2>Step 3: Student information</h2>
+      <h2>Step 2: Student information</h2>
+      <p class="inline-note">This information applies to all three exams you're about to take.</p>
       <form id="studentInfoForm">
         <div class="grid-columns field-row-2" style="margin-top: 1rem;">
           <div class="form-field">
@@ -68,7 +63,7 @@
           </select>
         </div>
         <div class="inline-note" id="studentInfoWarning" style="margin-top: 0.75rem;"></div>
-        <button class="button button-primary" type="submit" style="margin-top: 1.25rem;">Begin Exam</button>
+        <button class="button button-primary" type="submit" style="margin-top: 1.25rem;">Continue</button>
       </form>
     </section>
 
@@ -76,10 +71,10 @@
       <span id="floatingTimerLabel">60:00</span>
     </div>
 
-    <section class="panel-card" id="step3Section" style="display: none; margin-top: 1.5rem;">
+    <section class="panel-card" id="step2Section" style="display: none; margin-top: 1.5rem;">
       <div class="flex-gap-center" style="justify-content: space-between;">
         <div>
-          <h2>Step 4: Complete the exam</h2>
+          <h2 id="examStepHeading">Exam 1 of 3: OLT01</h2>
           <p class="inline-note" id="examProgressText"></p>
         </div>
         <span class="status-pill status-success" id="examStatus"></span>
@@ -92,13 +87,21 @@
       <div id="examSubmitWarning"></div>
     </section>
 
-    <section class="panel-card" id="step4Section" style="display: none; margin-top: 1.5rem; text-align: center;">
-      <h2>Final Result</h2>
-      <p class="inline-note" id="resultMessage" style="margin-top: 0.75rem;"></p>
+    <section class="panel-card" id="step3Section" style="display: none; margin-top: 1.5rem; text-align: center;">
+      <p class="eyebrow" id="interimEyebrow">Exam complete</p>
+      <h2 id="interimHeading">OLT01 result</h2>
+      <p class="inline-note" id="interimMessage" style="margin-top: 0.75rem;"></p>
       <div style="margin-top: 1.25rem; display: grid; gap: 1rem; justify-items: center;">
-        <span class="tag" id="scoreSummary"></span>
-        <span class="status-pill status-success" id="resultRating"></span>
+        <span class="tag" id="interimScore"></span>
+        <span class="status-pill status-success" id="interimRating"></span>
       </div>
+      <button class="button button-primary" id="continueButton" type="button" style="margin-top: 1.5rem;">Continue to next exam</button>
+    </section>
+
+    <section class="panel-card" id="step4Section" style="display: none; margin-top: 1.5rem; text-align: center;">
+      <h2 id="finalHeading">All Exams Complete</h2>
+      <p class="inline-note" id="finalMessage" style="margin-top: 0.75rem;"></p>
+      <div id="finalResultsList" style="margin-top: 1.5rem; display: grid; gap: 0.85rem; max-width: 420px; margin-left: auto; margin-right: auto;"></div>
       <button class="button button-primary" id="doneButton" type="button" style="margin-top: 1.5rem;">Done</button>
     </section>
   </main>
@@ -109,7 +112,6 @@
     const accessCodeForm = document.getElementById('accessCodeForm');
     const accessCodeInput = document.getElementById('accessCodeInput');
     const accessCodeWarning = document.getElementById('accessCodeWarning');
-    const examSelectCards = document.getElementById('examSelectCards');
     const step1Section = document.getElementById('step1Section');
     const step2Section = document.getElementById('step2Section');
     const step3Section = document.getElementById('step3Section');
@@ -117,6 +119,7 @@
     const studentQualification = document.getElementById('studentQualification');
     const studentInfoForm = document.getElementById('studentInfoForm');
     const studentInfoWarning = document.getElementById('studentInfoWarning');
+    const examStepHeading = document.getElementById('examStepHeading');
     const examProgressText = document.getElementById('examProgressText');
     const examStatus = document.getElementById('examStatus');
     const floatingTimer = document.getElementById('floatingTimer');
@@ -125,51 +128,34 @@
     const submitExamButton = document.getElementById('submitExamButton');
     const answeredCountText = document.getElementById('answeredCountText');
     const examSubmitWarning = document.getElementById('examSubmitWarning');
-    const scoreSummary = document.getElementById('scoreSummary');
-    const resultRating = document.getElementById('resultRating');
-    const resultMessage = document.getElementById('resultMessage');
+    const interimEyebrow = document.getElementById('interimEyebrow');
+    const interimHeading = document.getElementById('interimHeading');
+    const interimMessage = document.getElementById('interimMessage');
+    const interimScore = document.getElementById('interimScore');
+    const interimRating = document.getElementById('interimRating');
+    const continueButton = document.getElementById('continueButton');
+    const finalHeading = document.getElementById('finalHeading');
+    const finalMessage = document.getElementById('finalMessage');
+    const finalResultsList = document.getElementById('finalResultsList');
     const doneButton = document.getElementById('doneButton');
 
-    let EXAM_TYPES = [];
+    let EXAM_TYPES = [];       // fixed order, from server config, e.g. ['OLT01','TLT01','TNT01']
     let QUALIFICATIONS = [];
-    let selectedExamType = null;
-    let selectedQuestions = []; // public shape: no correctChoiceId (server scores it)
-    let shuffledQuestions = []; // shuffled copy shown to student
+    let EXAM_DURATION_MS = 60 * 60 * 1000;
+
+    let remainingExamTypes = []; // exam types this student still needs to take, in fixed order
+    let currentExamType = null;
+    let selectedQuestions = [];  // public shape for the CURRENT exam: no correctChoiceId (server scores it)
+    let shuffledQuestions = [];  // shuffled copy shown to student for the CURRENT exam
     let studentInfo = null;
     let redemptionToken = null;
-    let examDeadline = null;
+    let examDeadline = null;     // fresh deadline, recomputed for each individual exam
     let timerIntervalId = null;
     let autoSubmitTriggered = false;
-
-    function requiredCountFor(type) {
-      const counts = { OLT01: 35, TLT01: 35, TNT01: 30 };
-      return counts[type] || 0;
-    }
+    let sessionResults = [];    // { examType, score, totalItems, rating, message } for every exam completed this visit
 
     function initializeQualifications() {
       studentQualification.innerHTML = '<option value="">Select qualification</option>' + QUALIFICATIONS.map(item => `<option value="${item}">${item}</option>`).join('');
-    }
-
-    async function renderExamCards() {
-      examSelectCards.innerHTML = '<p class="inline-note">Loading...</p>';
-      const cardsData = await Promise.all(EXAM_TYPES.map(async type => {
-        const questions = await api.getQuestions(type).catch(() => []);
-        return { type, count: questions.length };
-      }));
-      examSelectCards.innerHTML = cardsData.map(({ type, count }) => {
-        const required = requiredCountFor(type);
-        const status = count >= required ? 'Complete' : `Only ${count} of ${required} items added`;
-        return `
-          <article class="card" style="cursor:pointer;" data-exam="${type}">
-            <h3>${type}</h3>
-            <p>${count} question${count === 1 ? '' : 's'}</p>
-            <p class="inline-note" style="margin-top:0.75rem;">${status}</p>
-          </article>
-        `;
-      }).join('');
-      examSelectCards.querySelectorAll('[data-exam]').forEach(card => {
-        card.addEventListener('click', () => selectExamType(card.dataset.exam));
-      });
     }
 
     function shuffleArray(arr) {
@@ -181,43 +167,39 @@
       return a;
     }
 
-    async function selectExamType(type) {
-      selectedExamType = type;
-      showSpinner('Loading exam questions...');
-      try {
-        selectedQuestions = await api.getQuestions(type);
-      } catch (error) {
-        selectedQuestions = [];
-      }
-      hideSpinner();
-      // Shuffle questions and choices for each student
-      shuffledQuestions = shuffleArray(selectedQuestions).map(q => ({
-        ...q,
-        choices: shuffleArray(q.choices)
-      }));
-      if (!selectedQuestions.length) {
-        examStatus.textContent = 'No questions available';
-        examStatus.className = 'status-pill status-warning';
-      } else {
-        examStatus.textContent = `${selectedQuestions.length} question${selectedQuestions.length === 1 ? '' : 's'} ready`;
-        examStatus.className = 'status-pill status-success';
-      }
-      step2Section.style.display = 'block';
-      window.scrollTo({ top: step2Section.offsetTop - 30, behavior: 'smooth' });
-    }
-
-    async function validateStudentInfo(event) {
+    accessCodeForm.addEventListener('submit', async event => {
       event.preventDefault();
-      if (!selectedExamType) {
-        studentInfoWarning.textContent = 'Please choose an exam type first.';
-        studentInfoWarning.className = 'alert-box';
-        return;
+      accessCodeWarning.textContent = '';
+      const code = accessCodeInput.value.trim().toUpperCase();
+      if (!code) return;
+      const submitButton = accessCodeForm.querySelector('button[type="submit"]');
+      submitButton.disabled = true;
+      submitButton.textContent = 'Checking...';
+      showSpinner('Validating access code...');
+      try {
+        const result = await api.redeemAccessCode(code);
+        redemptionToken = result.redemptionToken;
+        step0Section.style.display = 'none';
+        step1Section.style.display = 'block';
+        window.scrollTo({ top: step1Section.offsetTop - 30, behavior: 'smooth' });
+      } catch (error) {
+        accessCodeWarning.textContent = error.message;
+        accessCodeWarning.className = 'alert-box';
+      } finally {
+        hideSpinner();
+        submitButton.disabled = false;
+        submitButton.textContent = 'Continue';
       }
+    });
+
+    studentInfoForm.addEventListener('submit', async event => {
+      event.preventDefault();
       studentInfoWarning.textContent = '';
       const name = document.getElementById('studentName').value.trim();
       const age = Number(document.getElementById('studentAge').value);
       const sex = document.getElementById('studentSex').value;
       const qualification = studentQualification.value;
+
       if (!name || !age || !sex || !qualification) {
         studentInfoWarning.textContent = 'Please complete all required fields.';
         studentInfoWarning.className = 'alert-box';
@@ -229,40 +211,88 @@
         return;
       }
 
-      const { alreadyTaken } = await api.checkAttempt(selectedExamType, name, qualification);
-      if (alreadyTaken) {
-        studentInfoWarning.textContent = `You have already completed the ${selectedExamType} exam. Only one attempt is allowed per exam.`;
+      const submitButton = studentInfoForm.querySelector('button[type="submit"]');
+      submitButton.disabled = true;
+      showSpinner('Checking your exam history...');
+
+      try {
+        // Check each exam type in order — if the student already completed some
+        // (e.g. they're resuming with a new code after closing their browser),
+        // skip straight to whichever ones remain.
+        const attemptChecks = await Promise.all(
+          EXAM_TYPES.map(type => api.checkAttempt(type, name, qualification))
+        );
+        remainingExamTypes = EXAM_TYPES.filter((type, index) => !attemptChecks[index].alreadyTaken);
+
+        studentInfo = { studentName: name, age, sex, school: 'PTC-Catanduanes', qualification };
+        sessionResults = [];
+
+        if (!remainingExamTypes.length) {
+          hideSpinner();
+          showAllAlreadyComplete();
+          return;
+        }
+
+        hideSpinner();
+        step1Section.style.display = 'none';
+        await startNextExam();
+      } catch (error) {
+        hideSpinner();
+        studentInfoWarning.textContent = 'Something went wrong checking your exam history. Please try again.';
         studentInfoWarning.className = 'alert-box';
+      } finally {
+        submitButton.disabled = false;
+      }
+    });
+
+    async function startNextExam() {
+      if (!remainingExamTypes.length) {
+        showFinalSummary();
         return;
       }
+      currentExamType = remainingExamTypes.shift();
 
-      studentInfo = {
-        studentName: name,
-        age,
-        sex,
-        school: 'PTC-Catanduanes',
-        qualification
-      };
-      startExam();
-    }
+      showSpinner('Loading exam questions...');
+      try {
+        selectedQuestions = await api.getQuestions(currentExamType);
+      } catch (error) {
+        selectedQuestions = [];
+      }
+      hideSpinner();
 
-    function startExam() {
       if (!selectedQuestions.length) {
-        studentInfoWarning.textContent = 'The selected exam has no questions yet. Please choose a different exam or ask staff to add questions.';
-        studentInfoWarning.className = 'alert-box';
+        // No questions available for this exam type yet — skip it rather than
+        // blocking the student, and note it so staff can see it in the summary.
+        sessionResults.push({ examType: currentExamType, unavailable: true });
+        await startNextExam();
         return;
       }
-      step3Section.style.display = 'block';
-      step4Section.style.display = 'none';
+
+      shuffledQuestions = shuffleArray(selectedQuestions).map(q => ({
+        ...q,
+        choices: shuffleArray(q.choices)
+      }));
+
+      const examNumber = EXAM_TYPES.indexOf(currentExamType) + 1;
+      examStepHeading.textContent = `Exam ${examNumber} of ${EXAM_TYPES.length}: ${currentExamType}`;
+      examStatus.textContent = `${selectedQuestions.length} question${selectedQuestions.length === 1 ? '' : 's'}`;
+      examStatus.className = 'status-pill status-success';
+
+      autoSubmitTriggered = false;
+      examDeadline = new Date(Date.now() + EXAM_DURATION_MS).toISOString();
+
+      step2Section.style.display = 'block';
+      step3Section.style.display = 'none';
       renderExamQuestions();
       startTimer();
-      window.scrollTo({ top: step3Section.offsetTop - 30, behavior: 'smooth' });
+      window.scrollTo({ top: step2Section.offsetTop - 30, behavior: 'smooth' });
     }
 
     function startTimer() {
       if (!examDeadline) return;
       stopTimer();
       floatingTimer.style.display = 'flex';
+      floatingTimer.classList.remove('timer-danger');
       updateTimerDisplay();
       timerIntervalId = setInterval(updateTimerDisplay, 1000);
     }
@@ -303,7 +333,7 @@
         <article class="question-card">
           <div class="flex-gap-center" style="justify-content: space-between; gap: 1rem;">
             <h3>Question ${index + 1} of ${selectedQuestions.length}</h3>
-            <span class="status-pill status-success">${question.examType}</span>
+            <span class="status-pill status-success">${currentExamType}</span>
           </div>
           <p style="margin-top:0.75rem;">${question.questionText}</p>
           ${question.imageUrl ? `<img src="${question.imageUrl}" alt="Exam image" style="margin-top:1rem; border-radius: 14px;">` : ''}
@@ -362,7 +392,7 @@
 
       try {
         // Score is computed server-side from the real answer key - the client never sees or sends a score.
-        const result = await api.submitExam(selectedExamType, {
+        const result = await api.submitExam(currentExamType, {
           studentName: studentInfo.studentName,
           age: studentInfo.age,
           sex: studentInfo.sex,
@@ -371,68 +401,108 @@
           redemptionToken
         });
         hideSpinner();
-        showResult(result, isAuto);
+        sessionResults.push({
+          examType: currentExamType,
+          score: result.score,
+          totalItems: result.totalItems,
+          rating: result.rating,
+          message: result.message
+        });
+        showInterimResult(result, isAuto);
       } catch (error) {
         hideSpinner();
         examSubmitWarning.innerHTML = `<div class="alert-box">${error.message}</div>`;
         submitExamButton.disabled = false;
         submitExamButton.textContent = 'Submit Exam';
-        // If the auto-submit attempt itself failed, allow the timer's expiry message to
-        // remain visible but let the student retry manually via the button.
+      } finally {
+        submitExamButton.textContent = 'Submit Exam';
       }
     }
 
-    function showResult(result, wasAutoSubmitted) {
+    function showInterimResult(result, wasAutoSubmitted) {
       hideTimer();
-      step3Section.style.display = 'none';
-      step4Section.style.display = 'block';
-      scoreSummary.textContent = `${result.score} / ${result.totalItems}`;
-      resultRating.textContent = result.rating;
-      resultMessage.textContent = wasAutoSubmitted
-        ? `Time expired, so your exam was submitted automatically. ${result.message || getRatingMessage(result.rating)}`
-        : (result.message || getRatingMessage(result.rating));
+      step2Section.style.display = 'none';
+      step3Section.style.display = 'block';
+      submitExamButton.disabled = false;
+
+      const hasMore = remainingExamTypes.length > 0;
+      interimEyebrow.textContent = wasAutoSubmitted ? 'Time expired — auto-submitted' : 'Exam complete';
+      interimHeading.textContent = `${currentExamType} result`;
+      interimScore.textContent = `${result.score} / ${result.totalItems}`;
+      interimRating.textContent = result.rating;
+      interimMessage.textContent = result.message || getRatingMessage(result.rating);
+
+      if (hasMore) {
+        const nextType = remainingExamTypes[0];
+        continueButton.textContent = `Continue to next exam: ${nextType}`;
+      } else {
+        continueButton.textContent = 'See final summary';
+      }
+
       window.scrollTo({ top: 0, behavior: 'smooth' });
     }
 
-    accessCodeForm.addEventListener('submit', async event => {
-      event.preventDefault();
-      accessCodeWarning.textContent = '';
-      const code = accessCodeInput.value.trim().toUpperCase();
-      if (!code) return;
-      const submitButton = accessCodeForm.querySelector('button[type="submit"]');
-      submitButton.disabled = true;
-      submitButton.textContent = 'Checking...';
-      showSpinner('Validating access code...');
-      try {
-        const result = await api.redeemAccessCode(code);
-        redemptionToken = result.redemptionToken;
-        examDeadline = result.examDeadline;
-        step0Section.style.display = 'none';
-        step1Section.style.display = 'block';
-        window.scrollTo({ top: step1Section.offsetTop - 30, behavior: 'smooth' });
-      } catch (error) {
-        accessCodeWarning.textContent = error.message;
-        accessCodeWarning.className = 'alert-box';
-      } finally {
-        hideSpinner();
-        submitButton.disabled = false;
-        submitButton.textContent = 'Continue';
+    continueButton.addEventListener('click', async () => {
+      if (remainingExamTypes.length > 0) {
+        await startNextExam();
+      } else {
+        showFinalSummary();
       }
     });
+
+    function showFinalSummary() {
+      hideTimer();
+      step2Section.style.display = 'none';
+      step3Section.style.display = 'none';
+      step4Section.style.display = 'block';
+
+      finalHeading.textContent = 'All Exams Complete';
+      finalMessage.textContent = 'Thank you for completing all three exams. Here is a summary of your results.';
+
+      finalResultsList.innerHTML = sessionResults.map(item => {
+        if (item.unavailable) {
+          return `
+            <div class="card" style="padding:1rem; text-align:left;">
+              <strong>${item.examType}</strong>
+              <p class="inline-note" style="margin-top:0.35rem;">This exam had no questions available yet and was skipped. Please check with staff.</p>
+            </div>
+          `;
+        }
+        return `
+          <div class="card" style="padding:1rem; text-align:left;">
+            <div class="flex-gap-center" style="justify-content: space-between;">
+              <strong>${item.examType}</strong>
+              <span class="status-pill status-success">${item.rating}</span>
+            </div>
+            <p style="margin-top:0.5rem;">${item.score} / ${item.totalItems}</p>
+          </div>
+        `;
+      }).join('');
+
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    }
+
+    function showAllAlreadyComplete() {
+      step1Section.style.display = 'none';
+      step4Section.style.display = 'block';
+      finalHeading.textContent = 'Already Completed';
+      finalMessage.textContent = 'Our records show you have already completed all three exams for this qualification. If you believe this is a mistake, please contact staff.';
+      finalResultsList.innerHTML = '';
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    }
 
     doneButton.addEventListener('click', () => {
       window.location.href = 'student-exam.html';
     });
 
-    submitExamButton.addEventListener('click', submitExam);
-    studentInfoForm.addEventListener('submit', validateStudentInfo);
+    submitExamButton.addEventListener('click', () => submitExam());
 
     (async function init() {
       const config = await api.getConfig();
       EXAM_TYPES = config.examTypes;
       QUALIFICATIONS = config.qualifications;
+      EXAM_DURATION_MS = config.examDurationMs || EXAM_DURATION_MS;
       initializeQualifications();
-      renderExamCards();
     })();
   </script>
 </body>

@@ -718,6 +718,100 @@ app.get('/api/dashboard-summary', requireStaffAuth, async (req, res) => {
   }
 });
 
+// Monthly exam-taker summary, broken down by exam type and sex. Defaults to
+// the current real-world month/year whenever no query params are given, so
+// it always reflects "this month" automatically as time passes — no
+// hardcoded date anywhere. Counting is done entirely in SQL (GROUP BY), so
+// this stays cheap and memory-safe no matter how many results accumulate;
+// it never loads full result rows into the server.
+app.get('/api/dashboard-summary/period', requireStaffAuth, async (req, res) => {
+  try {
+    const now = new Date();
+    const month = req.query.month !== undefined ? parseInt(req.query.month, 10) : now.getMonth();
+    const year = req.query.year !== undefined ? parseInt(req.query.year, 10) : now.getFullYear();
+
+    if (!Number.isInteger(month) || month < 0 || month > 11 || !Number.isInteger(year)) {
+      return res.status(400).json({ error: 'Invalid month or year.' });
+    }
+
+    const startOfMonth = new Date(year, month, 1).toISOString();
+    const startOfNextMonth = new Date(month === 11 ? year + 1 : year, month === 11 ? 0 : month + 1, 1).toISOString();
+
+    const result = await db.execute({
+      sql: `SELECT examType, sex, COUNT(*) as cnt
+            FROM results
+            WHERE dateTaken >= ? AND dateTaken < ?
+            GROUP BY examType, sex`,
+      args: [startOfMonth, startOfNextMonth]
+    });
+
+    const breakdown = {};
+    EXAM_TYPES.forEach(type => { breakdown[type] = { total: 0, male: 0, female: 0 }; });
+
+    let grandTotal = 0;
+    let grandMale = 0;
+    let grandFemale = 0;
+
+    result.rows.forEach(row => {
+      const type = row.examType;
+      if (!breakdown[type]) breakdown[type] = { total: 0, male: 0, female: 0 };
+      const cnt = Number(row.cnt) || 0;
+      breakdown[type].total += cnt;
+      grandTotal += cnt;
+      const sexKey = String(row.sex || '').toLowerCase();
+      if (sexKey === 'male') {
+        breakdown[type].male += cnt;
+        grandMale += cnt;
+      } else if (sexKey === 'female') {
+        breakdown[type].female += cnt;
+        grandFemale += cnt;
+      }
+    });
+
+    res.json({ month, year, breakdown, grandTotal, grandMale, grandFemale });
+  } catch (error) {
+    console.error('Failed to get monthly summary:', error);
+    res.status(500).json({ error: 'Failed to load monthly summary.' });
+  }
+});
+
+// All-time summary of how many unique students have attempted each
+// qualification, and how many of those have completed all three exam types
+// vs are still partway through. Computed via a single GROUP BY query — no
+// full row loads, consistent with the memory-safety fix applied earlier.
+app.get('/api/dashboard-summary/qualifications', requireStaffAuth, async (req, res) => {
+  try {
+    const result = await db.execute(`
+      SELECT qualification, studentNameNormalized, COUNT(DISTINCT examType) as examsTaken
+      FROM results
+      GROUP BY qualification, studentNameNormalized
+    `);
+
+    const byQualification = {};
+    QUALIFICATIONS.forEach(q => { byQualification[q] = { totalStudents: 0, completedAll: 0, inProgress: 0 }; });
+
+    result.rows.forEach(row => {
+      const qualification = row.qualification;
+      if (!byQualification[qualification]) {
+        byQualification[qualification] = { totalStudents: 0, completedAll: 0, inProgress: 0 };
+      }
+      byQualification[qualification].totalStudents += 1;
+      if (Number(row.examsTaken) >= EXAM_TYPES.length) {
+        byQualification[qualification].completedAll += 1;
+      } else {
+        byQualification[qualification].inProgress += 1;
+      }
+    });
+
+    res.json({
+      qualifications: QUALIFICATIONS.map(q => ({ qualification: q, ...byQualification[q] }))
+    });
+  } catch (error) {
+    console.error('Failed to get qualification summary:', error);
+    res.status(500).json({ error: 'Failed to load qualification summary.' });
+  }
+});
+
 app.use((err, req, res, next) => {
   if (err instanceof multer.MulterError) {
     return res.status(400).json({ error: err.message });

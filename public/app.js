@@ -89,6 +89,20 @@ const api = {
     if (!res.ok) throw new Error('Failed to load dashboard summary.');
     return res.json();
   },
+  async getMonthlySummary(month, year) {
+    const params = new URLSearchParams();
+    if (month !== undefined && month !== null) params.set('month', month);
+    if (year !== undefined && year !== null) params.set('year', year);
+    const query = params.toString();
+    const res = await fetch(`/api/dashboard-summary/period${query ? `?${query}` : ''}`);
+    if (!res.ok) throw new Error('Failed to load monthly summary.');
+    return res.json();
+  },
+  async getQualificationSummary() {
+    const res = await fetch('/api/dashboard-summary/qualifications');
+    if (!res.ok) throw new Error('Failed to load qualification summary.');
+    return res.json();
+  },
   async generateAccessCodes(count) {
     const res = await fetch('/api/access-codes', {
       method: 'POST',
