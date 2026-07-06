@@ -33,12 +33,6 @@
       align-items: center;
       justify-content: space-between;
       padding: 1.5rem 0;
-      position: sticky;
-      top: 0;
-      z-index: 100;
-      background: color-mix(in srgb, var(--bg) 88%, transparent);
-      backdrop-filter: blur(10px);
-      -webkit-backdrop-filter: blur(10px);
     }
 
     .landing-logo-slot {
@@ -100,16 +94,7 @@
     /* Hero                                                              */
     /* ---------------------------------------------------------------- */
     .landing-hero {
-      position: sticky;
-      top: 0;
-      z-index: 1;
-      min-height: 100vh;
-      min-height: 100svh;
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      justify-content: center;
-      background: var(--bg);
+      position: relative;
       padding: 4.5rem 0 5rem;
       text-align: center;
       isolation: isolate;
@@ -212,35 +197,6 @@
     /* ---------------------------------------------------------------- */
     /* Assessment types — the signature "certification stamp" cards      */
     /* ---------------------------------------------------------------- */
-    /* ---------------------------------------------------------------- */
-    /* Scroll stacking: each section pins in turn, and the next section  */
-    /* slides up to cover it — like pages being laid over one another.   */
-    /* ---------------------------------------------------------------- */
-    .stack-layer {
-      position: sticky;
-      top: 0;
-      min-height: 100vh;
-      min-height: 100svh; /* avoids mobile address-bar jump; ignored where unsupported */
-      background: var(--bg);
-      box-shadow: 0 -24px 48px rgba(15, 23, 42, 0.10);
-    }
-
-    .assessment-section,
-    .programs-section {
-      display: flex;
-      flex-direction: column;
-      justify-content: center;
-    }
-
-    .assessment-section { z-index: 2; }
-    .programs-section   { z-index: 3; }
-
-    .landing-footer.stack-layer {
-      min-height: 0;
-      z-index: 4;
-      padding-top: 2.5rem;
-    }
-
     .section-label {
       text-align: center;
       font-family: 'Space Grotesk', sans-serif;
@@ -262,6 +218,7 @@
       display: grid;
       grid-template-columns: repeat(3, minmax(0, 1fr));
       gap: 1.75rem;
+      margin-bottom: 5rem;
     }
 
     .stamp-card {
@@ -340,7 +297,9 @@
     /* ---------------------------------------------------------------- */
     /* Programs covered                                                   */
     /* ---------------------------------------------------------------- */
-
+    .programs-section {
+      margin-bottom: 5rem;
+    }
 
     .program-tags {
       display: flex;
@@ -514,7 +473,7 @@
       </div>
     </section>
 
-    <section class="assessment-section stack-layer">
+    <section>
       <p class="section-label reveal reveal-text">Assessment Types</p>
       <h2 class="section-heading reveal reveal-text">Three exams, one standard</h2>
       <p class="lead reveal reveal-text" style="text-align:center; margin: -1.5rem auto 2.5rem; max-width: 42ch;">Every candidate sits one of three standardized modules, timed and scored the same way for everyone.</p>
@@ -537,7 +496,7 @@
       </div>
     </section>
 
-    <section class="programs-section stack-layer">
+    <section class="programs-section">
       <p class="section-label reveal reveal-text">Programs Covered</p>
       <h2 class="section-heading reveal reveal-text">Qualifications assessed under TCAT</h2>
       <div class="program-tags">
@@ -552,7 +511,7 @@
       </div>
     </section>
 
-    <footer class="landing-footer stack-layer">
+    <footer class="landing-footer">
       <div class="footer-brand reveal reveal-text">© <span id="footerYear"></span> PTC-Catanduanes · Technical Course Aptitude Test</div>
       <div class="footer-links reveal reveal-up">
         <a class="staff-quiet-link" href="staff-login.html">Staff Login</a>
