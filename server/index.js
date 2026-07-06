@@ -532,34 +532,38 @@ app.post('/api/exams/:examType/submit', async (req, res) => {
       return res.status(401).json({ error: 'Missing access code authorization. Please restart and enter your access code.' });
     }
 
-    const codeResult = await db.execute({ sql: 'SELECT * FROM access_codes WHERE usedByResultId = ?', args: [redemptionToken] });
-    if (!codeResult.rows[0]) {
-      return res.status(401).json({ error: 'Your access code authorization is invalid. Please restart and enter your access code.' });
+    const numericAge = Number(age);
+    if (!Number.isFinite(numericAge) || numericAge < 10 || numericAge > 80) {
+      return res.status(400).json({ error: 'Age must be between 10 and 80.' });
     }
+    if (answers.length > 200) return res.status(400).json({ error: 'Too many answers submitted.' });
     if (typeof studentName !== 'string' || studentName.trim().length > 200) {
       return res.status(400).json({ error: 'Student name is invalid or too long.' });
     }
     if (!['Male', 'Female'].includes(sex)) return res.status(400).json({ error: 'Invalid sex value.' });
     if (!QUALIFICATIONS.includes(qualification)) return res.status(400).json({ error: 'Invalid qualification.' });
 
-    const numericAge = Number(age);
-    if (!Number.isFinite(numericAge) || numericAge < 10 || numericAge > 80) {
-      return res.status(400).json({ error: 'Age must be between 10 and 80.' });
-    }
-    if (answers.length > 200) return res.status(400).json({ error: 'Too many answers submitted.' });
-
     const normalizedName = studentName.trim().toLowerCase();
     const normalizedQualification = qualification.trim().toLowerCase();
 
-    const alreadyTaken = await db.execute({
-      sql: 'SELECT id FROM results WHERE examType = ? AND studentNameNormalized = ? AND qualificationNormalized = ?',
-      args: [examType, normalizedName, normalizedQualification]
-    });
+    // These three reads don't depend on each other, so run them concurrently
+    // instead of one-after-another. Each round trip to Turso has real network
+    // cost — doing this cuts submission latency roughly to a third.
+    const [codeResult, alreadyTaken, questionRows] = await Promise.all([
+      db.execute({ sql: 'SELECT * FROM access_codes WHERE usedByResultId = ?', args: [redemptionToken] }),
+      db.execute({
+        sql: 'SELECT id FROM results WHERE examType = ? AND studentNameNormalized = ? AND qualificationNormalized = ?',
+        args: [examType, normalizedName, normalizedQualification]
+      }),
+      db.execute({ sql: 'SELECT id, questionText, choiceA, choiceB, choiceC, choiceD, correctChoiceId FROM questions WHERE examType = ?', args: [examType] })
+    ]);
+
+    if (!codeResult.rows[0]) {
+      return res.status(401).json({ error: 'Your access code authorization is invalid. Please restart and enter your access code.' });
+    }
     if (alreadyTaken.rows[0]) {
       return res.status(409).json({ error: `You have already completed the ${examType} exam. Only one attempt is allowed per exam.` });
     }
-
-    const questionRows = await db.execute({ sql: 'SELECT id, questionText, choiceA, choiceB, choiceC, choiceD, correctChoiceId FROM questions WHERE examType = ?', args: [examType] });
     if (!questionRows.rows.length) return res.status(400).json({ error: 'This exam has no questions yet.' });
 
     const answerDetails = buildAnswerDetails(questionRows.rows, answers);

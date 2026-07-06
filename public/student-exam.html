@@ -15,6 +15,8 @@
       </div>
     </div>
 
+    <div id="examProgressStepper" class="exam-stepper" style="display:none;"></div>
+
     <section class="panel-card" id="step0Section">
       <h2>Step 1: Enter your access code</h2>
       <p class="inline-note">Ask your proctor for a one-time access code before starting. Each code can only be used once. You'll take all three exams (OLT01, TLT01, TNT01) in sequence, one at a time.</p>
@@ -95,6 +97,10 @@
         <span class="tag" id="interimScore"></span>
         <span class="status-pill status-success" id="interimRating"></span>
       </div>
+      <div id="interimNextStepsBox" class="warning-box" style="margin-top: 1.5rem; text-align: left; display: none;">
+        <strong id="interimNextStepsHeading">What's next</strong>
+        <p id="interimNextStepsText" style="margin-top: 0.4rem;"></p>
+      </div>
       <button class="button button-primary" id="continueButton" type="button" style="margin-top: 1.5rem;">Continue to next exam</button>
     </section>
 
@@ -133,11 +139,15 @@
     const interimMessage = document.getElementById('interimMessage');
     const interimScore = document.getElementById('interimScore');
     const interimRating = document.getElementById('interimRating');
+    const interimNextStepsBox = document.getElementById('interimNextStepsBox');
+    const interimNextStepsHeading = document.getElementById('interimNextStepsHeading');
+    const interimNextStepsText = document.getElementById('interimNextStepsText');
     const continueButton = document.getElementById('continueButton');
     const finalHeading = document.getElementById('finalHeading');
     const finalMessage = document.getElementById('finalMessage');
     const finalResultsList = document.getElementById('finalResultsList');
     const doneButton = document.getElementById('doneButton');
+    const examProgressStepper = document.getElementById('examProgressStepper');
 
     let EXAM_TYPES = [];       // fixed order, from server config, e.g. ['OLT01','TLT01','TNT01']
     let QUALIFICATIONS = [];
@@ -156,6 +166,32 @@
 
     function initializeQualifications() {
       studentQualification.innerHTML = '<option value="">Select qualification</option>' + QUALIFICATIONS.map(item => `<option value="${item}">${item}</option>`).join('');
+    }
+
+    // Persistent visual guide so the student always knows: what's done,
+    // what they're on now, and what's still coming up.
+    function renderProgressStepper() {
+      if (!EXAM_TYPES.length) return;
+      const completedTypes = new Set(sessionResults.filter(r => !r.unavailable).map(r => r.examType));
+      examProgressStepper.style.display = 'flex';
+      examProgressStepper.innerHTML = EXAM_TYPES.map((type, index) => {
+        let stateClass = '';
+        let dotContent = index + 1;
+        if (completedTypes.has(type)) {
+          stateClass = 'done';
+          dotContent = '✓';
+        } else if (type === currentExamType) {
+          stateClass = 'current';
+        }
+        const connector = index < EXAM_TYPES.length - 1 ? '<div class="exam-stepper-connector"></div>' : '';
+        return `
+          <div class="exam-stepper-item ${stateClass}">
+            <span class="step-dot">${dotContent}</span>
+            <span>${type}</span>
+          </div>
+          ${connector}
+        `;
+      }).join('');
     }
 
     function shuffleArray(arr) {
@@ -281,6 +317,7 @@
       autoSubmitTriggered = false;
       examDeadline = new Date(Date.now() + EXAM_DURATION_MS).toISOString();
 
+      renderProgressStepper();
       step2Section.style.display = 'block';
       step3Section.style.display = 'none';
       renderExamQuestions();
@@ -424,6 +461,7 @@
       step2Section.style.display = 'none';
       step3Section.style.display = 'block';
       submitExamButton.disabled = false;
+      renderProgressStepper();
 
       const hasMore = remainingExamTypes.length > 0;
       interimEyebrow.textContent = wasAutoSubmitted ? 'Time expired — auto-submitted' : 'Exam complete';
@@ -434,8 +472,15 @@
 
       if (hasMore) {
         const nextType = remainingExamTypes[0];
-        continueButton.textContent = `Continue to next exam: ${nextType}`;
+        const remainingCount = remainingExamTypes.length;
+        interimNextStepsBox.style.display = 'block';
+        interimNextStepsHeading.textContent = `You still have ${remainingCount} exam${remainingCount === 1 ? '' : 's'} left`;
+        interimNextStepsText.textContent = `Do not close this page. Click the button below to start ${nextType} now — it will get a fresh full hour, same as this one did. Remaining after this: ${remainingExamTypes.join(', ')}.`;
+        continueButton.textContent = `Start next exam: ${nextType}`;
       } else {
+        interimNextStepsBox.style.display = 'block';
+        interimNextStepsHeading.textContent = "That's your last exam done";
+        interimNextStepsText.textContent = 'Click below to see your combined results for all three exams.';
         continueButton.textContent = 'See final summary';
       }
 
@@ -455,6 +500,8 @@
       step2Section.style.display = 'none';
       step3Section.style.display = 'none';
       step4Section.style.display = 'block';
+      currentExamType = null;
+      renderProgressStepper();
 
       finalHeading.textContent = 'All Exams Complete';
       finalMessage.textContent = 'Thank you for completing all three exams. Here is a summary of your results.';
