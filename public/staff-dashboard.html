@@ -16,34 +16,6 @@
     </div>
 
     <section class="panel-card" style="margin-bottom: 1.5rem;">
-      <div class="flex-gap-center" style="justify-content: space-between; flex-wrap: wrap; gap: 1rem;">
-        <div>
-          <h2 style="margin:0;">Monthly Summary</h2>
-          <p class="inline-note" id="summaryPeriodLabel" style="margin-top:0.35rem;"></p>
-        </div>
-        <div class="flex-gap-center">
-          <div class="form-field" style="margin:0;">
-            <select id="summaryMonthSelect" class="search-input" style="width:auto; font-size:0.88rem; padding:6px 10px;"></select>
-          </div>
-          <div class="form-field" style="margin:0;">
-            <select id="summaryYearSelect" class="search-input" style="width:auto; font-size:0.88rem; padding:6px 10px;"></select>
-          </div>
-        </div>
-      </div>
-
-      <div id="summaryContent" style="margin-top:1.25rem;">
-        <p class="inline-note">Loading...</p>
-      </div>
-
-      <div class="card" style="margin-top:1rem; padding:1rem; background: var(--surface-strong);">
-        <div class="flex-gap-center" style="justify-content: space-between; flex-wrap: wrap; gap: 0.5rem;">
-          <strong id="summaryGrandTotal">0 total attempts</strong>
-          <span class="inline-note" id="summaryGrandSplit" style="margin:0;"></span>
-        </div>
-      </div>
-    </section>
-
-    <section class="panel-card" style="margin-bottom: 1.5rem;">
       <h2 style="margin:0;">Students by Qualification</h2>
       <p class="inline-note" style="margin-top:0.35rem;">All-time headcount of students who have attempted each qualification, and how many have completed all three exams. Click a qualification to see student details.</p>
       <div id="qualificationSummaryContent" style="margin-top:1.25rem;">
@@ -66,72 +38,7 @@
   <script src="app.js"></script>
   <script>
     const dashboardCards = document.getElementById('dashboardCards');
-    const summaryMonthSelect = document.getElementById('summaryMonthSelect');
-    const summaryYearSelect = document.getElementById('summaryYearSelect');
-    const summaryPeriodLabel = document.getElementById('summaryPeriodLabel');
-    const summaryContent = document.getElementById('summaryContent');
-    const summaryGrandTotal = document.getElementById('summaryGrandTotal');
-    const summaryGrandSplit = document.getElementById('summaryGrandSplit');
     const qualificationSummaryContent = document.getElementById('qualificationSummaryContent');
-
-    const MONTHS = ['January','February','March','April','May','June','July','August','September','October','November','December'];
-
-    // Always initializes to the real current month/year — never a fixed date.
-    // Since this reads from `new Date()` on every page load, it automatically
-    // rolls forward on its own whenever a new month or year begins.
-    function initSummarySelectors() {
-      const now = new Date();
-      const currentMonth = now.getMonth();
-      const currentYear = now.getFullYear();
-
-      summaryMonthSelect.innerHTML = MONTHS.map((m, i) =>
-        `<option value="${i}" ${i === currentMonth ? 'selected' : ''}>${m}</option>`
-      ).join('');
-
-      const years = [];
-      for (let y = currentYear; y >= currentYear - 5; y--) years.push(y);
-      summaryYearSelect.innerHTML = years.map(y =>
-        `<option value="${y}" ${y === currentYear ? 'selected' : ''}>${y}</option>`
-      ).join('');
-    }
-
-    async function renderMonthlySummary() {
-      const month = parseInt(summaryMonthSelect.value);
-      const year = parseInt(summaryYearSelect.value);
-      summaryPeriodLabel.textContent = `${MONTHS[month]} ${year}`;
-
-      try {
-        const data = await api.getMonthlySummary(month, year);
-        const examTypes = Object.keys(data.breakdown);
-        summaryContent.innerHTML = `
-          <div class="grid-columns grid-3">
-            ${examTypes.map(type => {
-              const stats = data.breakdown[type];
-              return `
-                <div class="card" style="padding:1rem;">
-                  <h3 style="margin:0;">${type}</h3>
-                  <p style="margin-top:0.5rem; font-size:1.6rem; font-weight:700; color:var(--primary);">${stats.total}</p>
-                  <p class="inline-note" style="margin-top:0.25rem;">student${stats.total === 1 ? '' : 's'} took this exam</p>
-                  <div class="flex-gap" style="margin-top:0.75rem; gap:0.75rem;">
-                    <span class="inline-note" style="margin:0;">Male: <strong style="color:var(--text);">${stats.male}</strong></span>
-                    <span class="inline-note" style="margin:0;">Female: <strong style="color:var(--text);">${stats.female}</strong></span>
-                  </div>
-                </div>
-              `;
-            }).join('')}
-          </div>
-        `;
-        summaryGrandTotal.textContent = `${data.grandTotal} total attempt${data.grandTotal === 1 ? '' : 's'} this month`;
-        summaryGrandSplit.textContent = `Male: ${data.grandMale} · Female: ${data.grandFemale}`;
-      } catch (error) {
-        summaryContent.innerHTML = `<p class="inline-note">Failed to load summary: ${error.message}</p>`;
-        summaryGrandTotal.textContent = '';
-        summaryGrandSplit.textContent = '';
-      }
-    }
-
-    summaryMonthSelect.addEventListener('change', renderMonthlySummary);
-    summaryYearSelect.addEventListener('change', renderMonthlySummary);
 
     async function renderQualificationSummary() {
       try {
@@ -189,8 +96,6 @@
       const ok = await requireStaffSession();
       if (!ok) return;
       renderStaffNav('dashboard');
-      initSummarySelectors();
-      renderMonthlySummary();
       renderQualificationSummary();
       renderDashboard();
     })();
