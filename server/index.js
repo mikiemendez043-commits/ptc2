@@ -816,6 +816,50 @@ app.get('/api/dashboard-summary/qualifications', requireStaffAuth, async (req, r
   }
 });
 
+// Per-student detail for one qualification: name, age, sex, and each exam
+// type's score/rating/date (with the result id so staff can delete a
+// specific attempt). Text-only fields, no images — safe to return in full.
+app.get('/api/dashboard-summary/qualifications/:qualification', requireStaffAuth, async (req, res) => {
+  try {
+    const { qualification } = req.params;
+    if (!QUALIFICATIONS.includes(qualification)) {
+      return res.status(400).json({ error: 'Invalid qualification.' });
+    }
+
+    const result = await db.execute({
+      sql: `SELECT id, examType, studentName, studentNameNormalized, age, sex, score, totalItems, rating, dateTaken
+            FROM results WHERE qualification = ?
+            ORDER BY studentNameNormalized ASC, examType ASC`,
+      args: [qualification]
+    });
+
+    const studentsMap = new Map();
+    result.rows.forEach(row => {
+      const key = row.studentNameNormalized;
+      if (!studentsMap.has(key)) {
+        studentsMap.set(key, {
+          studentName: row.studentName,
+          age: row.age,
+          sex: row.sex,
+          results: {}
+        });
+      }
+      studentsMap.get(key).results[row.examType] = {
+        id: row.id,
+        score: row.score,
+        totalItems: row.totalItems,
+        rating: row.rating,
+        dateTaken: row.dateTaken
+      };
+    });
+
+    res.json({ qualification, students: Array.from(studentsMap.values()) });
+  } catch (error) {
+    console.error('Failed to get qualification detail:', error);
+    res.status(500).json({ error: 'Failed to load qualification detail.' });
+  }
+});
+
 app.use((err, req, res, next) => {
   if (err instanceof multer.MulterError) {
     return res.status(400).json({ error: err.message });

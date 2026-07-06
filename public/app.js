@@ -103,6 +103,11 @@ const api = {
     if (!res.ok) throw new Error('Failed to load qualification summary.');
     return res.json();
   },
+  async getQualificationDetail(qualification) {
+    const res = await fetch(`/api/dashboard-summary/qualifications/${encodeURIComponent(qualification)}`);
+    if (!res.ok) throw new Error('Failed to load qualification detail.');
+    return res.json();
+  },
   async generateAccessCodes(count) {
     const res = await fetch('/api/access-codes', {
       method: 'POST',

@@ -45,9 +45,22 @@
 
     <section class="panel-card" style="margin-bottom: 1.5rem;">
       <h2 style="margin:0;">Students by Qualification</h2>
-      <p class="inline-note" style="margin-top:0.35rem;">All-time headcount of students who have attempted each qualification, and how many have completed all three exams.</p>
+      <p class="inline-note" style="margin-top:0.35rem;">All-time headcount of students who have attempted each qualification, and how many have completed all three exams. Click a qualification to see student details.</p>
       <div id="qualificationSummaryContent" style="margin-top:1.25rem;">
         <p class="inline-note">Loading...</p>
+      </div>
+
+      <div id="qualificationDetailPanel" style="display:none; margin-top:1.5rem; border-top: 1px solid rgba(148,163,184,0.2); padding-top: 1.5rem;">
+        <div class="flex-gap-center" style="justify-content: space-between; flex-wrap: wrap; gap: 1rem;">
+          <h3 id="qualificationDetailTitle" style="margin:0;">Details</h3>
+          <div class="flex-gap-center">
+            <div class="form-field" style="margin:0;">
+              <select id="qualificationDetailMonthSelect" class="search-input" style="width:auto; font-size:0.85rem; padding:6px 10px;"></select>
+            </div>
+            <button class="button button-secondary" id="qualificationDetailCloseButton" type="button" style="padding:0.5rem 0.9rem; font-size:0.85rem;">Close</button>
+          </div>
+        </div>
+        <div id="qualificationDetailContent" style="margin-top:1.25rem;"></div>
       </div>
     </section>
 
@@ -73,8 +86,14 @@
     const summaryGrandTotal = document.getElementById('summaryGrandTotal');
     const summaryGrandSplit = document.getElementById('summaryGrandSplit');
     const qualificationSummaryContent = document.getElementById('qualificationSummaryContent');
+    const qualificationDetailPanel = document.getElementById('qualificationDetailPanel');
+    const qualificationDetailTitle = document.getElementById('qualificationDetailTitle');
+    const qualificationDetailContent = document.getElementById('qualificationDetailContent');
+    const qualificationDetailMonthSelect = document.getElementById('qualificationDetailMonthSelect');
+    const qualificationDetailCloseButton = document.getElementById('qualificationDetailCloseButton');
 
     const MONTHS = ['January','February','March','April','May','June','July','August','September','October','November','December'];
+    let EXAM_TYPES_CACHE = [];
 
     // Always initializes to the real current month/year — never a fixed date.
     // Since this reads from `new Date()` on every page load, it automatically
@@ -140,7 +159,7 @@
         qualificationSummaryContent.innerHTML = `
           <div style="display:grid; gap:0.75rem;">
             ${rows.map(item => `
-              <div class="card" style="padding:0.9rem 1.1rem;">
+              <div class="card qualification-row" data-qualification="${item.qualification}" style="padding:0.9rem 1.1rem; cursor:pointer;">
                 <div class="flex-gap-center" style="justify-content: space-between; flex-wrap: wrap; gap:0.5rem;">
                   <strong>${item.qualification}</strong>
                   <span style="font-size:1.15rem; font-weight:700; color:var(--primary);">${item.totalStudents} student${item.totalStudents === 1 ? '' : 's'}</span>
@@ -154,10 +173,125 @@
             `).join('')}
           </div>
         `;
+        qualificationSummaryContent.querySelectorAll('.qualification-row').forEach(row => {
+          row.addEventListener('click', () => openQualificationDetail(row.dataset.qualification));
+        });
       } catch (error) {
         qualificationSummaryContent.innerHTML = `<p class="inline-note">Failed to load qualification summary: ${error.message}</p>`;
       }
     }
+
+    let currentQualificationDetail = null; // cached fetch result, so month filter doesn't re-fetch
+
+    function populateDetailMonthOptions() {
+      const now = new Date();
+      const years = [];
+      for (let y = now.getFullYear(); y >= now.getFullYear() - 5; y--) years.push(y);
+      const options = ['<option value="all">All time</option>'];
+      years.forEach(y => {
+        MONTHS.forEach((m, i) => {
+          options.push(`<option value="${y}-${i}">${m} ${y}</option>`);
+        });
+      });
+      qualificationDetailMonthSelect.innerHTML = options.join('');
+      qualificationDetailMonthSelect.value = 'all';
+    }
+
+    async function openQualificationDetail(qualification) {
+      qualificationDetailPanel.style.display = 'block';
+      qualificationDetailTitle.textContent = `${qualification} — Student Details`;
+      qualificationDetailContent.innerHTML = '<p class="inline-note">Loading...</p>';
+      populateDetailMonthOptions();
+      qualificationDetailPanel.dataset.qualification = qualification;
+      qualificationDetailPanel.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+
+      try {
+        currentQualificationDetail = await api.getQualificationDetail(qualification);
+        renderQualificationDetailTable();
+      } catch (error) {
+        qualificationDetailContent.innerHTML = `<p class="inline-note">Failed to load details: ${error.message}</p>`;
+      }
+    }
+
+    function renderQualificationDetailTable() {
+      if (!currentQualificationDetail) return;
+      const filterValue = qualificationDetailMonthSelect.value;
+      let students = currentQualificationDetail.students;
+
+      if (filterValue !== 'all') {
+        const [filterYear, filterMonth] = filterValue.split('-').map(Number);
+        students = students.filter(student => {
+          return EXAM_TYPES_CACHE.some(type => {
+            const r = student.results[type];
+            if (!r || !r.dateTaken) return false;
+            const d = new Date(r.dateTaken);
+            return d.getFullYear() === filterYear && d.getMonth() === filterMonth;
+          });
+        });
+      }
+
+      if (!students.length) {
+        qualificationDetailContent.innerHTML = '<p class="inline-note">No students match this filter.</p>';
+        return;
+      }
+
+      qualificationDetailContent.innerHTML = `
+        <div class="table-card" style="box-shadow:none; padding:0;">
+          <table>
+            <thead>
+              <tr>
+                <th>Name</th>
+                <th>Age</th>
+                <th>Sex</th>
+                ${EXAM_TYPES_CACHE.map(type => `<th>${type}</th>`).join('')}
+              </tr>
+            </thead>
+            <tbody>
+              ${students.map(student => `
+                <tr>
+                  <td>${student.studentName}</td>
+                  <td>${student.age}</td>
+                  <td>${student.sex}</td>
+                  ${EXAM_TYPES_CACHE.map(type => {
+                    const r = student.results[type];
+                    if (!r) return '<td class="inline-note">Not taken</td>';
+                    return `
+                      <td>
+                        <div class="flex-gap-center" style="gap:0.5rem;">
+                          <span>${r.score}/${r.totalItems} (${r.rating})</span>
+                          <button class="button button-danger delete-detail-result" type="button" data-id="${r.id}" style="padding:0.2rem 0.55rem; font-size:0.75rem;">Delete</button>
+                        </div>
+                      </td>
+                    `;
+                  }).join('')}
+                </tr>
+              `).join('')}
+            </tbody>
+          </table>
+        </div>
+      `;
+
+      qualificationDetailContent.querySelectorAll('.delete-detail-result').forEach(button => {
+        button.addEventListener('click', async () => {
+          if (!confirm('Delete this exam result permanently? This cannot be undone.')) return;
+          try {
+            await api.deleteResult(button.dataset.id);
+            const qualification = qualificationDetailPanel.dataset.qualification;
+            currentQualificationDetail = await api.getQualificationDetail(qualification);
+            renderQualificationDetailTable();
+            renderQualificationSummary();
+          } catch (error) {
+            alert(`Failed to delete: ${error.message}`);
+          }
+        });
+      });
+    }
+
+    qualificationDetailMonthSelect.addEventListener('change', renderQualificationDetailTable);
+    qualificationDetailCloseButton.addEventListener('click', () => {
+      qualificationDetailPanel.style.display = 'none';
+      currentQualificationDetail = null;
+    });
 
     async function renderDashboard() {
       showSpinner('Loading dashboard...');
@@ -189,6 +323,8 @@
       const ok = await requireStaffSession();
       if (!ok) return;
       renderStaffNav('dashboard');
+      const config = await api.getConfig();
+      EXAM_TYPES_CACHE = config.examTypes;
       initSummarySelectors();
       renderMonthlySummary();
       renderQualificationSummary();
