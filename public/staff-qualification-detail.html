@@ -19,8 +19,26 @@
     <section class="table-card">
       <div class="flex-gap-center" style="justify-content: space-between; flex-wrap: wrap; gap: 1rem; margin-bottom: 1.25rem;">
         <p class="inline-note" id="qualificationSubtitle" style="margin:0;"></p>
-        <div class="form-field" style="margin:0;">
-          <select id="monthFilterSelect" class="search-input" style="width:auto; font-size:0.88rem; padding:6px 10px;"></select>
+        <div class="flex-gap-center" style="gap:0.6rem; flex-wrap: wrap;">
+          <div class="form-field" style="margin:0;">
+            <select id="filterTypeSelect" class="search-input" style="width:auto; font-size:0.88rem; padding:6px 10px;">
+              <option value="all">All time</option>
+              <option value="week">Specific week</option>
+              <option value="month">Specific month</option>
+              <option value="year">Specific year</option>
+            </select>
+          </div>
+          <div class="form-field" id="weekFilterWrap" style="margin:0; display:none;">
+            <input type="week" id="weekFilterInput" class="search-input" style="width:auto; font-size:0.88rem; padding:5px 10px;">
+          </div>
+          <div class="form-field flex-gap-center" id="monthFilterWrap" style="margin:0; display:none; gap:0.4rem;">
+            <select id="monthSelect" class="search-input" style="width:auto; font-size:0.88rem; padding:6px 10px;"></select>
+            <select id="monthYearSelect" class="search-input" style="width:auto; font-size:0.88rem; padding:6px 10px;"></select>
+          </div>
+          <div class="form-field" id="yearFilterWrap" style="margin:0; display:none;">
+            <select id="yearOnlySelect" class="search-input" style="width:auto; font-size:0.88rem; padding:6px 10px;"></select>
+          </div>
+          <button class="button button-ghost" id="clearFilterButton" type="button" style="padding:6px 14px; font-size:0.85rem;">Clear</button>
         </div>
       </div>
       <div id="detailContent"><p class="inline-note">Loading...</p></div>
@@ -31,44 +49,129 @@
   <script>
     const qualificationTitle = document.getElementById('qualificationTitle');
     const qualificationSubtitle = document.getElementById('qualificationSubtitle');
-    const monthFilterSelect = document.getElementById('monthFilterSelect');
     const detailContent = document.getElementById('detailContent');
+
+    const filterTypeSelect = document.getElementById('filterTypeSelect');
+    const weekFilterWrap = document.getElementById('weekFilterWrap');
+    const weekFilterInput = document.getElementById('weekFilterInput');
+    const monthFilterWrap = document.getElementById('monthFilterWrap');
+    const monthSelect = document.getElementById('monthSelect');
+    const monthYearSelect = document.getElementById('monthYearSelect');
+    const yearFilterWrap = document.getElementById('yearFilterWrap');
+    const yearOnlySelect = document.getElementById('yearOnlySelect');
+    const clearFilterButton = document.getElementById('clearFilterButton');
 
     const MONTHS = ['January','February','March','April','May','June','July','August','September','October','November','December'];
 
     let qualification = null;
     let examTypes = [];
-    let detailData = null; // cached fetch result, so the month filter doesn't re-fetch
+    let detailData = null; // cached fetch result, so filtering never re-fetches
 
-    function populateMonthOptions() {
+    function yearRange() {
       const now = new Date();
       const years = [];
       for (let y = now.getFullYear(); y >= now.getFullYear() - 5; y--) years.push(y);
-      const options = ['<option value="all">All time</option>'];
-      years.forEach(y => {
-        MONTHS.forEach((m, i) => {
-          options.push(`<option value="${y}-${i}">${m} ${y}</option>`);
-        });
-      });
-      monthFilterSelect.innerHTML = options.join('');
-      monthFilterSelect.value = 'all';
+      return years;
     }
 
-    function studentMatchesFilter(student, filterValue) {
-      if (filterValue === 'all') return true;
-      const [filterYear, filterMonth] = filterValue.split('-').map(Number);
+    // Returns the ISO week string (e.g. "2026-W27") for right now, used as the
+    // default value so the week picker opens on something relevant.
+    function getCurrentISOWeekString() {
+      const now = new Date();
+      const target = new Date(now.valueOf());
+      const dayNr = (now.getDay() + 6) % 7;
+      target.setDate(target.getDate() - dayNr + 3);
+      const firstThursday = target.valueOf();
+      target.setMonth(0, 1);
+      if (target.getDay() !== 4) {
+        target.setMonth(0, 1 + ((4 - target.getDay()) + 7) % 7);
+      }
+      const week = 1 + Math.ceil((firstThursday - target) / (7 * 24 * 3600 * 1000));
+      return `${now.getFullYear()}-W${String(week).padStart(2, '0')}`;
+    }
+
+    // Converts an ISO week string ("YYYY-Www") into the [start, end) Date
+    // range it covers, using the standard ISO 8601 definition (weeks start
+    // Monday, week 1 is the week containing the year's first Thursday).
+    function getISOWeekRange(weekValue) {
+      const [yearPart, weekPart] = weekValue.split('-W');
+      const year = Number(yearPart);
+      const week = Number(weekPart);
+      const simple = new Date(Date.UTC(year, 0, 1 + (week - 1) * 7));
+      const dow = simple.getUTCDay();
+      const start = new Date(simple);
+      if (dow <= 4) {
+        start.setUTCDate(simple.getUTCDate() - dow + 1);
+      } else {
+        start.setUTCDate(simple.getUTCDate() + 8 - dow);
+      }
+      const end = new Date(start);
+      end.setUTCDate(start.getUTCDate() + 7);
+      return { start, end };
+    }
+
+    function populateFilterOptions() {
+      const now = new Date();
+
+      monthSelect.innerHTML = MONTHS.map((m, i) => `<option value="${i}">${m}</option>`).join('');
+      monthSelect.value = String(now.getMonth());
+
+      const years = yearRange();
+      monthYearSelect.innerHTML = years.map(y => `<option value="${y}">${y}</option>`).join('');
+      monthYearSelect.value = String(now.getFullYear());
+
+      yearOnlySelect.innerHTML = years.map(y => `<option value="${y}">${y}</option>`).join('');
+      yearOnlySelect.value = String(now.getFullYear());
+
+      weekFilterInput.value = getCurrentISOWeekString();
+    }
+
+    function updateFilterVisibility() {
+      const type = filterTypeSelect.value;
+      weekFilterWrap.style.display = type === 'week' ? 'flex' : 'none';
+      monthFilterWrap.style.display = type === 'month' ? 'flex' : 'none';
+      yearFilterWrap.style.display = type === 'year' ? 'flex' : 'none';
+    }
+
+    function getCurrentFilter() {
+      const type = filterTypeSelect.value;
+      if (type === 'week') {
+        return { type, week: weekFilterInput.value };
+      }
+      if (type === 'month') {
+        return { type, month: Number(monthSelect.value), year: Number(monthYearSelect.value) };
+      }
+      if (type === 'year') {
+        return { type, year: Number(yearOnlySelect.value) };
+      }
+      return { type: 'all' };
+    }
+
+    function studentMatchesFilter(student, filter) {
+      if (filter.type === 'all') return true;
       return examTypes.some(type => {
         const r = student.results[type];
         if (!r || !r.dateTaken) return false;
         const d = new Date(r.dateTaken);
-        return d.getFullYear() === filterYear && d.getMonth() === filterMonth;
+        if (filter.type === 'week') {
+          if (!filter.week) return false;
+          const { start, end } = getISOWeekRange(filter.week);
+          return d >= start && d < end;
+        }
+        if (filter.type === 'month') {
+          return d.getFullYear() === filter.year && d.getMonth() === filter.month;
+        }
+        if (filter.type === 'year') {
+          return d.getFullYear() === filter.year;
+        }
+        return false;
       });
     }
 
     function renderTable() {
       if (!detailData) return;
-      const filterValue = monthFilterSelect.value;
-      const students = detailData.students.filter(s => studentMatchesFilter(s, filterValue));
+      const filter = getCurrentFilter();
+      const students = detailData.students.filter(s => studentMatchesFilter(s, filter));
 
       if (!students.length) {
         detailContent.innerHTML = '<p class="inline-note">No students match this filter.</p>';
@@ -132,7 +235,20 @@
       });
     }
 
-    monthFilterSelect.addEventListener('change', renderTable);
+    filterTypeSelect.addEventListener('change', () => {
+      updateFilterVisibility();
+      renderTable();
+    });
+    weekFilterInput.addEventListener('change', renderTable);
+    monthSelect.addEventListener('change', renderTable);
+    monthYearSelect.addEventListener('change', renderTable);
+    yearOnlySelect.addEventListener('change', renderTable);
+
+    clearFilterButton.addEventListener('click', () => {
+      filterTypeSelect.value = 'all';
+      updateFilterVisibility();
+      renderTable();
+    });
 
     (async function init() {
       const ok = await requireStaffSession();
@@ -147,7 +263,8 @@
 
       qualificationTitle.textContent = qualification;
       qualificationSubtitle.textContent = 'Every student who has attempted this qualification, with their score on each exam.';
-      populateMonthOptions();
+      populateFilterOptions();
+      updateFilterVisibility();
 
       const config = await api.getConfig();
       examTypes = config.examTypes;
