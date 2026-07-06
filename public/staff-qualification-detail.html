@@ -1,0 +1,167 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Qualification Detail — TCAT</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <main class="page-shell">
+    <div class="page-header">
+      <div>
+        <p class="eyebrow">Students by Qualification</p>
+        <h1 id="qualificationTitle">Loading...</h1>
+      </div>
+      <a class="button button-secondary" href="staff-dashboard.html">Back to Dashboard</a>
+    </div>
+
+    <section class="table-card">
+      <div class="flex-gap-center" style="justify-content: space-between; flex-wrap: wrap; gap: 1rem; margin-bottom: 1.25rem;">
+        <p class="inline-note" id="qualificationSubtitle" style="margin:0;"></p>
+        <div class="form-field" style="margin:0;">
+          <select id="monthFilterSelect" class="search-input" style="width:auto; font-size:0.88rem; padding:6px 10px;"></select>
+        </div>
+      </div>
+      <div id="detailContent"><p class="inline-note">Loading...</p></div>
+    </section>
+  </main>
+
+  <script src="app.js"></script>
+  <script>
+    const qualificationTitle = document.getElementById('qualificationTitle');
+    const qualificationSubtitle = document.getElementById('qualificationSubtitle');
+    const monthFilterSelect = document.getElementById('monthFilterSelect');
+    const detailContent = document.getElementById('detailContent');
+
+    const MONTHS = ['January','February','March','April','May','June','July','August','September','October','November','December'];
+
+    let qualification = null;
+    let examTypes = [];
+    let detailData = null; // cached fetch result, so the month filter doesn't re-fetch
+
+    function populateMonthOptions() {
+      const now = new Date();
+      const years = [];
+      for (let y = now.getFullYear(); y >= now.getFullYear() - 5; y--) years.push(y);
+      const options = ['<option value="all">All time</option>'];
+      years.forEach(y => {
+        MONTHS.forEach((m, i) => {
+          options.push(`<option value="${y}-${i}">${m} ${y}</option>`);
+        });
+      });
+      monthFilterSelect.innerHTML = options.join('');
+      monthFilterSelect.value = 'all';
+    }
+
+    function studentMatchesFilter(student, filterValue) {
+      if (filterValue === 'all') return true;
+      const [filterYear, filterMonth] = filterValue.split('-').map(Number);
+      return examTypes.some(type => {
+        const r = student.results[type];
+        if (!r || !r.dateTaken) return false;
+        const d = new Date(r.dateTaken);
+        return d.getFullYear() === filterYear && d.getMonth() === filterMonth;
+      });
+    }
+
+    function renderTable() {
+      if (!detailData) return;
+      const filterValue = monthFilterSelect.value;
+      const students = detailData.students.filter(s => studentMatchesFilter(s, filterValue));
+
+      if (!students.length) {
+        detailContent.innerHTML = '<p class="inline-note">No students match this filter.</p>';
+        return;
+      }
+
+      detailContent.innerHTML = `
+        <table>
+          <thead>
+            <tr>
+              <th>Name</th>
+              <th>Age</th>
+              <th>Sex</th>
+              ${examTypes.map(type => `<th>${type}</th>`).join('')}
+              <th></th>
+            </tr>
+          </thead>
+          <tbody>
+            ${students.map((student, index) => `
+              <tr data-student-index="${index}">
+                <td>${student.studentName}</td>
+                <td>${student.age}</td>
+                <td>${student.sex}</td>
+                ${examTypes.map(type => {
+                  const r = student.results[type];
+                  if (!r) return '<td class="inline-note">Not taken</td>';
+                  return `<td>${r.score}/${r.totalItems} (${r.rating})</td>`;
+                }).join('')}
+                <td>
+                  <button class="button button-danger delete-student-row" type="button" data-student-index="${index}" style="padding:0.4rem 0.8rem; font-size:0.82rem;">Delete</button>
+                </td>
+              </tr>
+            `).join('')}
+          </tbody>
+        </table>
+      `;
+
+      detailContent.querySelectorAll('.delete-student-row').forEach(button => {
+        button.addEventListener('click', async () => {
+          const student = students[Number(button.dataset.studentIndex)];
+          const resultIds = examTypes.map(type => student.results[type] && student.results[type].id).filter(Boolean);
+          if (!resultIds.length) return;
+
+          const confirmMessage = `Delete all ${resultIds.length} exam result${resultIds.length === 1 ? '' : 's'} for ${student.studentName}? This cannot be undone.`;
+          if (!confirm(confirmMessage)) return;
+
+          button.disabled = true;
+          button.textContent = 'Deleting...';
+          try {
+            for (const id of resultIds) {
+              await api.deleteResult(id);
+            }
+            detailData = await api.getQualificationDetail(qualification);
+            renderTable();
+          } catch (error) {
+            alert(`Failed to delete: ${error.message}`);
+            button.disabled = false;
+            button.textContent = 'Delete';
+          }
+        });
+      });
+    }
+
+    monthFilterSelect.addEventListener('change', renderTable);
+
+    (async function init() {
+      const ok = await requireStaffSession();
+      if (!ok) return;
+      renderStaffNav('qualification-detail');
+
+      qualification = getQueryParam('qualification');
+      if (!qualification) {
+        detailContent.innerHTML = '<p class="inline-note">No qualification specified.</p>';
+        return;
+      }
+
+      qualificationTitle.textContent = qualification;
+      qualificationSubtitle.textContent = 'Every student who has attempted this qualification, with their score on each exam.';
+      populateMonthOptions();
+
+      const config = await api.getConfig();
+      examTypes = config.examTypes;
+
+      showSpinner('Loading student details...');
+      try {
+        detailData = await api.getQualificationDetail(qualification);
+        renderTable();
+      } catch (error) {
+        detailContent.innerHTML = `<p class="inline-note">Failed to load details: ${error.message}</p>`;
+      } finally {
+        hideSpinner();
+      }
+    })();
+  </script>
+</body>
+</html>
