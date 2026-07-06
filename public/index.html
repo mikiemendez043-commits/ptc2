@@ -98,6 +98,8 @@
       padding: 4.5rem 0 5rem;
       text-align: center;
       isolation: isolate;
+      --mx: 50%;
+      --my: 30%;
     }
 
     .landing-hero::before {
@@ -111,6 +113,29 @@
       background-size: 42px 42px;
       mask-image: radial-gradient(ellipse 60% 70% at 50% 35%, black 40%, transparent 78%);
       -webkit-mask-image: radial-gradient(ellipse 60% 70% at 50% 35%, black 40%, transparent 78%);
+    }
+
+    /* Interactive layer: a brighter copy of the same grid, revealed only in a
+       soft circle that follows the cursor — like a light tracing a blueprint. */
+    .landing-hero::after {
+      content: '';
+      position: absolute;
+      inset: -2rem -50vw;
+      z-index: -1;
+      background-image:
+        linear-gradient(rgba(22, 78, 99, 0.32) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(22, 78, 99, 0.32) 1px, transparent 1px);
+      background-size: 42px 42px;
+      mask-image: radial-gradient(circle 200px at var(--mx) var(--my), black 0%, transparent 100%);
+      -webkit-mask-image: radial-gradient(circle 200px at var(--mx) var(--my), black 0%, transparent 100%);
+      opacity: 0;
+      transition: opacity 0.35s ease;
+      pointer-events: none;
+    }
+
+    .landing-hero:hover::after,
+    .landing-hero:focus-within::after {
+      opacity: 1;
     }
 
     .hero-eyebrow {
@@ -201,6 +226,13 @@
       text-align: center;
       border: 1px solid rgba(148, 163, 184, 0.18);
       box-shadow: var(--shadow);
+      transition: transform 0.3s cubic-bezier(0.2, 0.9, 0.3, 1.1), box-shadow 0.3s ease, border-color 0.3s ease;
+    }
+
+    .stamp-card:hover {
+      transform: translateY(-8px);
+      box-shadow: 0 24px 44px rgba(22, 78, 99, 0.2);
+      border-color: rgba(217, 119, 6, 0.4);
     }
 
     .stamp-seal {
@@ -213,6 +245,11 @@
       align-items: center;
       justify-content: center;
       position: relative;
+      transition: transform 0.35s cubic-bezier(0.2, 0.9, 0.3, 1.1);
+    }
+
+    .stamp-card:hover .stamp-seal {
+      transform: rotate(-8deg) scale(1.08);
     }
 
     .stamp-seal::after {
@@ -280,6 +317,13 @@
       padding: 0.65rem 1.1rem;
       position: relative;
       padding-left: 1.75rem;
+      transition: transform 0.2s ease, background-color 0.2s ease, border-color 0.2s ease;
+    }
+
+    .program-tag:hover {
+      transform: translateY(-3px);
+      background: rgba(45, 106, 79, 0.07);
+      border-color: rgba(45, 106, 79, 0.35);
     }
 
     .program-tag::before {
@@ -318,18 +362,57 @@
       gap: 1.5rem;
     }
 
-    @keyframes stampReveal {
-      from { opacity: 0; transform: scale(0.9) rotate(-6deg); }
-      to { opacity: 1; transform: scale(1) rotate(0deg); }
+    /* ---------------------------------------------------------------- */
+    /* Motion: hero entrance (on load) + scroll reveal (below the fold)  */
+    /* ---------------------------------------------------------------- */
+    @keyframes fadeSlideUp {
+      from { opacity: 0; transform: translateY(18px); }
+      to { opacity: 1; transform: translateY(0); }
     }
 
+    .reveal {
+      opacity: 0;
+      transform: translateY(22px);
+      transition: opacity 0.6s ease, transform 0.6s cubic-bezier(0.2, 0.9, 0.3, 1.1);
+    }
+
+    .reveal.in-view {
+      opacity: 1;
+      transform: translateY(0);
+    }
+
+    .stamp-row .reveal:nth-child(2) { transition-delay: 0.08s; }
+    .stamp-row .reveal:nth-child(3) { transition-delay: 0.16s; }
+
+    .program-tags .reveal:nth-child(2) { transition-delay: 0.04s; }
+    .program-tags .reveal:nth-child(3) { transition-delay: 0.08s; }
+    .program-tags .reveal:nth-child(4) { transition-delay: 0.12s; }
+    .program-tags .reveal:nth-child(5) { transition-delay: 0.16s; }
+    .program-tags .reveal:nth-child(6) { transition-delay: 0.2s; }
+    .program-tags .reveal:nth-child(7) { transition-delay: 0.24s; }
+    .program-tags .reveal:nth-child(8) { transition-delay: 0.28s; }
+
     @media (prefers-reduced-motion: no-preference) {
-      .stamp-seal {
-        animation: stampReveal 0.5s cubic-bezier(0.2, 0.9, 0.3, 1.1) backwards;
+      .hero-anim {
+        opacity: 0;
+        animation: fadeSlideUp 0.6s cubic-bezier(0.2, 0.9, 0.3, 1.1) forwards;
       }
-      .stamp-card:nth-child(1) .stamp-seal { animation-delay: 0.05s; }
-      .stamp-card:nth-child(2) .stamp-seal { animation-delay: 0.18s; }
-      .stamp-card:nth-child(3) .stamp-seal { animation-delay: 0.31s; }
+      .hero-anim:nth-of-type(1) { animation-delay: 0.05s; }
+      .hero-anim:nth-of-type(2) { animation-delay: 0.16s; }
+      .hero-anim:nth-of-type(3) { animation-delay: 0.27s; }
+      .hero-anim:nth-of-type(4) { animation-delay: 0.38s; }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      .reveal, .hero-anim {
+        opacity: 1;
+        transform: none;
+        transition: none;
+        animation: none;
+      }
+      .landing-hero::after {
+        display: none;
+      }
     }
 
     @media (max-width: 820px) {
@@ -365,30 +448,30 @@
     </header>
 
     <section class="landing-hero">
-      <span class="hero-eyebrow">Technical Course Aptitude Test</span>
-      <h1>Show what you can <em>actually</em> do.</h1>
-      <p class="lead">TCAT is the official skills assessment for PTC-Catanduanes' technical-vocational programs — a straightforward way to measure readiness across trade qualifications.</p>
-      <div class="hero-actions">
+      <span class="hero-eyebrow hero-anim">Technical Course Aptitude Test</span>
+      <h1 class="hero-anim">Show what you can <em>actually</em> do.</h1>
+      <p class="lead hero-anim">TCAT is the official skills assessment for PTC-Catanduanes' technical-vocational programs — a straightforward way to measure readiness across trade qualifications.</p>
+      <div class="hero-actions hero-anim">
         <a class="button button-primary button-large" href="student-exam.html">Take an Exam</a>
       </div>
     </section>
 
     <section>
-      <p class="section-label">Assessment Types</p>
-      <h2 class="section-heading">Three exams, one standard</h2>
-      <p class="lead" style="text-align:center; margin: -1.5rem auto 2.5rem; max-width: 42ch;">Every candidate sits one of three standardized modules, timed and scored the same way for everyone.</p>
+      <p class="section-label reveal">Assessment Types</p>
+      <h2 class="section-heading reveal">Three exams, one standard</h2>
+      <p class="lead reveal" style="text-align:center; margin: -1.5rem auto 2.5rem; max-width: 42ch;">Every candidate sits one of three standardized modules, timed and scored the same way for everyone.</p>
       <div class="stamp-row">
-        <article class="stamp-card">
+        <article class="stamp-card reveal">
           <div class="stamp-seal"><span class="stamp-code">OLT01</span></div>
           <h3>OLT01</h3>
           <span class="stamp-meta">35 items · 1 hour</span>
         </article>
-        <article class="stamp-card">
+        <article class="stamp-card reveal">
           <div class="stamp-seal"><span class="stamp-code">TLT01</span></div>
           <h3>TLT01</h3>
           <span class="stamp-meta">35 items · 1 hour</span>
         </article>
-        <article class="stamp-card">
+        <article class="stamp-card reveal">
           <div class="stamp-seal"><span class="stamp-code">TNT01</span></div>
           <h3>TNT01</h3>
           <span class="stamp-meta">30 items · 1 hour</span>
@@ -397,17 +480,17 @@
     </section>
 
     <section class="programs-section">
-      <p class="section-label">Programs Covered</p>
-      <h2 class="section-heading">Qualifications assessed under TCAT</h2>
+      <p class="section-label reveal">Programs Covered</p>
+      <h2 class="section-heading reveal">Qualifications assessed under TCAT</h2>
       <div class="program-tags">
-        <span class="program-tag">Driving NC II</span>
-        <span class="program-tag">Organic Agriculture Production NC II</span>
-        <span class="program-tag">Construction Painting NC II</span>
-        <span class="program-tag">Masonry NC I</span>
-        <span class="program-tag">Bread and Pastry Production NC II</span>
-        <span class="program-tag">Agroentrepreneurship NC II</span>
-        <span class="program-tag">Agroentrepreneurship NC III</span>
-        <span class="program-tag">Community Nutrition Services NC II</span>
+        <span class="program-tag reveal">Driving NC II</span>
+        <span class="program-tag reveal">Organic Agriculture Production NC II</span>
+        <span class="program-tag reveal">Construction Painting NC II</span>
+        <span class="program-tag reveal">Masonry NC I</span>
+        <span class="program-tag reveal">Bread and Pastry Production NC II</span>
+        <span class="program-tag reveal">Agroentrepreneurship NC II</span>
+        <span class="program-tag reveal">Agroentrepreneurship NC III</span>
+        <span class="program-tag reveal">Community Nutrition Services NC II</span>
       </div>
     </section>
 
@@ -421,6 +504,39 @@
 
   <script>
     document.getElementById('footerYear').textContent = new Date().getFullYear();
+
+    // Scroll reveal: fade + slide up elements as they enter the viewport.
+    // Each element animates once, then stops being observed.
+    const revealEls = document.querySelectorAll('.reveal');
+    if ('IntersectionObserver' in window && revealEls.length) {
+      const revealObserver = new IntersectionObserver((entries) => {
+        entries.forEach(entry => {
+          if (entry.isIntersecting) {
+            entry.target.classList.add('in-view');
+            revealObserver.unobserve(entry.target);
+          }
+        });
+      }, { threshold: 0.15 });
+      revealEls.forEach(el => revealObserver.observe(el));
+    } else {
+      // No IntersectionObserver support — just show everything.
+      revealEls.forEach(el => el.classList.add('in-view'));
+    }
+
+    // Interactive grid: the hero's grid background brightens in a soft circle
+    // that follows the cursor, like a light tracing over blueprint paper.
+    // Skipped entirely if the person prefers reduced motion.
+    const prefersReducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    const heroSection = document.querySelector('.landing-hero');
+    if (heroSection && !prefersReducedMotion) {
+      heroSection.addEventListener('mousemove', (event) => {
+        const rect = heroSection.getBoundingClientRect();
+        const mx = ((event.clientX - rect.left) / rect.width) * 100;
+        const my = ((event.clientY - rect.top) / rect.height) * 100;
+        heroSection.style.setProperty('--mx', `${mx}%`);
+        heroSection.style.setProperty('--my', `${my}%`);
+      });
+    }
   </script>
 </body>
 </html>
