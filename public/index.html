@@ -100,6 +100,7 @@
       isolation: isolate;
       --mx: 50%;
       --my: 30%;
+      --parallax: 0px;
     }
 
     .landing-hero::before {
@@ -113,6 +114,8 @@
       background-size: 42px 42px;
       mask-image: radial-gradient(ellipse 60% 70% at 50% 35%, black 40%, transparent 78%);
       -webkit-mask-image: radial-gradient(ellipse 60% 70% at 50% 35%, black 40%, transparent 78%);
+      transform: translateY(var(--parallax));
+      will-change: transform;
     }
 
     /* Interactive layer: a brighter copy of the same grid, revealed only in a
@@ -363,7 +366,7 @@
     }
 
     /* ---------------------------------------------------------------- */
-    /* Motion: hero entrance (on load) + scroll reveal (below the fold)  */
+    /* Motion: hero entrance (on load) + varied scroll reveal             */
     /* ---------------------------------------------------------------- */
     @keyframes fadeSlideUp {
       from { opacity: 0; transform: translateY(18px); }
@@ -372,25 +375,38 @@
 
     .reveal {
       opacity: 0;
-      transform: translateY(22px);
-      transition: opacity 0.6s ease, transform 0.6s cubic-bezier(0.2, 0.9, 0.3, 1.1);
+      transition: opacity 0.7s ease, transform 0.75s cubic-bezier(0.16, 1, 0.3, 1), filter 0.7s ease;
     }
 
-    .reveal.in-view {
+    /* Variants give real variety instead of one flat fade-up.            */
+    .reveal-up     { transform: translateY(30px); }
+    .reveal-left   { transform: translateX(-52px) translateY(10px); }
+    .reveal-right  { transform: translateX(52px) translateY(10px); }
+    .reveal-scale  { transform: scale(0.8) translateY(16px); }
+    .reveal-text   { transform: translateY(14px); filter: blur(7px); }
+    .reveal-rot-l  { transform: translateY(18px) rotate(-6deg); }
+    .reveal-rot-r  { transform: translateY(18px) rotate(6deg); }
+
+    /* Deliberately a single class (lower specificity than the card/tag
+       hover rules above) so hover keeps working normally on revealed
+       elements — this resets opacity/transform/filter without ever
+       out-specificity-ing the hover states. */
+    .in-view {
       opacity: 1;
-      transform: translateY(0);
+      transform: translateY(0) translateX(0) scale(1) rotate(0deg);
+      filter: blur(0);
     }
 
-    .stamp-row .reveal:nth-child(2) { transition-delay: 0.08s; }
-    .stamp-row .reveal:nth-child(3) { transition-delay: 0.16s; }
+    .stamp-row .reveal:nth-child(2) { transition-delay: 0.1s; }
+    .stamp-row .reveal:nth-child(3) { transition-delay: 0.2s; }
 
-    .program-tags .reveal:nth-child(2) { transition-delay: 0.04s; }
-    .program-tags .reveal:nth-child(3) { transition-delay: 0.08s; }
-    .program-tags .reveal:nth-child(4) { transition-delay: 0.12s; }
-    .program-tags .reveal:nth-child(5) { transition-delay: 0.16s; }
-    .program-tags .reveal:nth-child(6) { transition-delay: 0.2s; }
-    .program-tags .reveal:nth-child(7) { transition-delay: 0.24s; }
-    .program-tags .reveal:nth-child(8) { transition-delay: 0.28s; }
+    .program-tags .reveal:nth-child(2) { transition-delay: 0.05s; }
+    .program-tags .reveal:nth-child(3) { transition-delay: 0.1s; }
+    .program-tags .reveal:nth-child(4) { transition-delay: 0.15s; }
+    .program-tags .reveal:nth-child(5) { transition-delay: 0.2s; }
+    .program-tags .reveal:nth-child(6) { transition-delay: 0.25s; }
+    .program-tags .reveal:nth-child(7) { transition-delay: 0.3s; }
+    .program-tags .reveal:nth-child(8) { transition-delay: 0.35s; }
 
     @media (prefers-reduced-motion: no-preference) {
       .hero-anim {
@@ -407,6 +423,7 @@
       .reveal, .hero-anim {
         opacity: 1;
         transform: none;
+        filter: none;
         transition: none;
         animation: none;
       }
@@ -457,21 +474,21 @@
     </section>
 
     <section>
-      <p class="section-label reveal">Assessment Types</p>
-      <h2 class="section-heading reveal">Three exams, one standard</h2>
-      <p class="lead reveal" style="text-align:center; margin: -1.5rem auto 2.5rem; max-width: 42ch;">Every candidate sits one of three standardized modules, timed and scored the same way for everyone.</p>
+      <p class="section-label reveal reveal-text">Assessment Types</p>
+      <h2 class="section-heading reveal reveal-text">Three exams, one standard</h2>
+      <p class="lead reveal reveal-text" style="text-align:center; margin: -1.5rem auto 2.5rem; max-width: 42ch;">Every candidate sits one of three standardized modules, timed and scored the same way for everyone.</p>
       <div class="stamp-row">
-        <article class="stamp-card reveal">
+        <article class="stamp-card reveal reveal-left">
           <div class="stamp-seal"><span class="stamp-code">OLT01</span></div>
           <h3>OLT01</h3>
           <span class="stamp-meta">35 items · 1 hour</span>
         </article>
-        <article class="stamp-card reveal">
+        <article class="stamp-card reveal reveal-scale">
           <div class="stamp-seal"><span class="stamp-code">TLT01</span></div>
           <h3>TLT01</h3>
           <span class="stamp-meta">35 items · 1 hour</span>
         </article>
-        <article class="stamp-card reveal">
+        <article class="stamp-card reveal reveal-right">
           <div class="stamp-seal"><span class="stamp-code">TNT01</span></div>
           <h3>TNT01</h3>
           <span class="stamp-meta">30 items · 1 hour</span>
@@ -480,23 +497,23 @@
     </section>
 
     <section class="programs-section">
-      <p class="section-label reveal">Programs Covered</p>
-      <h2 class="section-heading reveal">Qualifications assessed under TCAT</h2>
+      <p class="section-label reveal reveal-text">Programs Covered</p>
+      <h2 class="section-heading reveal reveal-text">Qualifications assessed under TCAT</h2>
       <div class="program-tags">
-        <span class="program-tag reveal">Driving NC II</span>
-        <span class="program-tag reveal">Organic Agriculture Production NC II</span>
-        <span class="program-tag reveal">Construction Painting NC II</span>
-        <span class="program-tag reveal">Masonry NC I</span>
-        <span class="program-tag reveal">Bread and Pastry Production NC II</span>
-        <span class="program-tag reveal">Agroentrepreneurship NC II</span>
-        <span class="program-tag reveal">Agroentrepreneurship NC III</span>
-        <span class="program-tag reveal">Community Nutrition Services NC II</span>
+        <span class="program-tag reveal reveal-rot-l">Driving NC II</span>
+        <span class="program-tag reveal reveal-rot-r">Organic Agriculture Production NC II</span>
+        <span class="program-tag reveal reveal-rot-l">Construction Painting NC II</span>
+        <span class="program-tag reveal reveal-rot-r">Masonry NC I</span>
+        <span class="program-tag reveal reveal-rot-l">Bread and Pastry Production NC II</span>
+        <span class="program-tag reveal reveal-rot-r">Agroentrepreneurship NC II</span>
+        <span class="program-tag reveal reveal-rot-l">Agroentrepreneurship NC III</span>
+        <span class="program-tag reveal reveal-rot-r">Community Nutrition Services NC II</span>
       </div>
     </section>
 
     <footer class="landing-footer">
-      <div class="footer-brand">© <span id="footerYear"></span> PTC-Catanduanes · Technical Course Aptitude Test</div>
-      <div class="footer-links">
+      <div class="footer-brand reveal reveal-text">© <span id="footerYear"></span> PTC-Catanduanes · Technical Course Aptitude Test</div>
+      <div class="footer-links reveal reveal-up">
         <a class="staff-quiet-link" href="staff-login.html">Staff Login</a>
       </div>
     </footer>
@@ -536,6 +553,21 @@
         heroSection.style.setProperty('--mx', `${mx}%`);
         heroSection.style.setProperty('--my', `${my}%`);
       });
+
+      // Scroll-linked parallax: the grid drifts slower than the page scroll,
+      // giving the hero a sense of depth rather than a flat background.
+      let parallaxScheduled = false;
+      function updateParallax() {
+        const shift = Math.min(window.scrollY * 0.22, 90);
+        heroSection.style.setProperty('--parallax', `${shift}px`);
+        parallaxScheduled = false;
+      }
+      window.addEventListener('scroll', () => {
+        if (!parallaxScheduled) {
+          parallaxScheduled = true;
+          requestAnimationFrame(updateParallax);
+        }
+      }, { passive: true });
     }
   </script>
 </body>
