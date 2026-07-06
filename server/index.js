@@ -625,69 +625,6 @@ app.get('/api/results', requireStaffAuth, async (req, res) => {
   }
 });
 
-app.get('/api/results/:id', requireStaffAuth, async (req, res) => {
-  try {
-    const result = await db.execute({ sql: 'SELECT * FROM results WHERE id = ?', args: [req.params.id] });
-    if (!result.rows[0]) return res.status(404).json({ error: 'Result not found.' });
-    res.json(rowToResult(result.rows[0]));
-  } catch (error) {
-    console.error('Failed to get result:', error);
-    res.status(500).json({ error: 'Failed to load result.' });
-  }
-});
-
-app.put('/api/results/:id', requireStaffAuth, async (req, res) => {
-  try {
-    const existingResult = await db.execute({ sql: 'SELECT * FROM results WHERE id = ?', args: [req.params.id] });
-    const existing = existingResult.rows[0];
-    if (!existing) return res.status(404).json({ error: 'Result not found.' });
-
-    const { studentName, age, sex, qualification, answers } = req.body || {};
-    if (!studentName || !age || !sex || !qualification || !Array.isArray(answers)) {
-      return res.status(400).json({ error: 'Missing required student information or answers.' });
-    }
-
-    const numericAge = Number(age);
-    if (!Number.isFinite(numericAge) || numericAge < 10 || numericAge > 80) {
-      return res.status(400).json({ error: 'Age must be between 10 and 80.' });
-    }
-    if (typeof studentName !== 'string' || studentName.trim().length > 200) {
-      return res.status(400).json({ error: 'Student name is invalid or too long.' });
-    }
-    if (!['Male', 'Female'].includes(sex)) return res.status(400).json({ error: 'Invalid sex value.' });
-    if (!QUALIFICATIONS.includes(qualification)) return res.status(400).json({ error: 'Invalid qualification.' });
-
-    const normalizedName = studentName.trim().toLowerCase();
-    const normalizedQualification = qualification.trim().toLowerCase();
-
-    const duplicate = await db.execute({
-      sql: 'SELECT id FROM results WHERE examType = ? AND studentNameNormalized = ? AND qualificationNormalized = ? AND id != ?',
-      args: [existing.examType, normalizedName, normalizedQualification, req.params.id]
-    });
-    if (duplicate.rows[0]) {
-      return res.status(409).json({ error: 'Another result already exists for this student and qualification.' });
-    }
-
-    const questionRows = await db.execute({ sql: 'SELECT id, questionText, choiceA, choiceB, choiceC, choiceD, correctChoiceId FROM questions WHERE examType = ?', args: [existing.examType] });
-    if (!questionRows.rows.length) return res.status(400).json({ error: 'This exam has no questions yet.' });
-
-    const answerDetails = buildAnswerDetails(questionRows.rows, answers);
-    const score = answerDetails.filter(item => item.isCorrect).length;
-    const rating = getRating(existing.examType, score);
-
-    await db.execute({
-      sql: `UPDATE results SET studentName = ?, studentNameNormalized = ?, age = ?, sex = ?, qualification = ?, qualificationNormalized = ?, score = ?, totalItems = ?, rating = ?, answersData = ? WHERE id = ?`,
-      args: [studentName.trim(), normalizedName, numericAge, sex, qualification, normalizedQualification, score, questionRows.rows.length, rating, JSON.stringify(answerDetails), req.params.id]
-    });
-
-    const updated = await db.execute({ sql: 'SELECT * FROM results WHERE id = ?', args: [req.params.id] });
-    res.json(rowToResult(updated.rows[0]));
-  } catch (error) {
-    console.error('Failed to update result:', error);
-    res.status(500).json({ error: 'Failed to update result.' });
-  }
-});
-
 app.delete('/api/results/:id', requireStaffAuth, async (req, res) => {
   try {
     const existing = await db.execute({ sql: 'SELECT * FROM results WHERE id = ?', args: [req.params.id] });
