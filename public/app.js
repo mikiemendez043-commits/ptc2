@@ -52,6 +52,16 @@ const api = {
     if (!res.ok) throw new Error(data.error || 'Failed to submit exam.');
     return data;
   },
+  async startExam(examType, redemptionToken) {
+    const res = await fetch(`/api/exams/${examType}/start`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ redemptionToken })
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Failed to start exam.');
+    return data;
+  },
   async checkAttempt(examType, studentName, qualification) {
     const params = new URLSearchParams({ studentName, qualification });
     const res = await fetch(`/api/exams/${examType}/check-attempt?${params}`);
@@ -61,6 +71,22 @@ const api = {
     const res = await fetch(`/api/results?examType=${encodeURIComponent(examType)}`);
     if (!res.ok) throw new Error('Failed to load results.');
     return res.json();
+  },
+  async getResult(resultId) {
+    const res = await fetch(`/api/results/${resultId}`);
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Failed to load result details.');
+    return data;
+  },
+  async updateResult(resultId, payload) {
+    const res = await fetch(`/api/results/${resultId}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Failed to update result.');
+    return data;
   },
   async deleteResult(resultId) {
     const res = await fetch(`/api/results/${resultId}`, { method: 'DELETE' });

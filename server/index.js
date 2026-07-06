@@ -22,6 +22,15 @@ const PORT = process.env.PORT || 3000;
 const STAFF_USERNAME = process.env.STAFF_USERNAME || 'admin';
 const STAFF_PASSWORD = process.env.STAFF_PASSWORD || 'admin123';
 const EXAM_DURATION_MS = 60 * 60 * 1000;
+// How much extra time we tolerate past the official deadline before rejecting
+// a submission outright. Covers real network/server lag around the exact
+// cutoff — not meant to give students extra time to answer.
+const SUBMIT_GRACE_MS = 5 * 60 * 1000;
+// How long an already-used access code stays "resumable" (same code can be
+// re-entered) after it was first redeemed — covers a student accidentally
+// refreshing, losing WiFi, or their device sleeping mid-session. Sized to
+// cover all three exams back-to-back plus breathing room.
+const RESUME_WINDOW_MS = EXAM_TYPES.length * EXAM_DURATION_MS + 30 * 60 * 1000;
 
 app.use(express.json({ limit: '20mb' }));
 
@@ -489,7 +498,27 @@ app.post('/api/access-codes/redeem', async (req, res) => {
     const rowResult = await db.execute({ sql: 'SELECT * FROM access_codes WHERE code = ?', args: [normalizedCode] });
     const row = rowResult.rows[0];
     if (!row) return res.status(404).json({ error: 'That access code was not recognized. Check with your proctor.' });
-    if (row.usedAt) return res.status(409).json({ error: 'That access code has already been used.' });
+
+    // Code already used: this is normally an error, EXCEPT we allow the same
+    // student to resume with it if they're still within a reasonable window
+    // of their original start (e.g. they refreshed the page or lost WiFi
+    // mid-exam). This avoids forcing staff to issue a brand new code for
+    // every accidental refresh, while still expiring stale sessions.
+    if (row.usedAt) {
+      const startedAtMs = row.examStartedAt ? Date.parse(row.examStartedAt) : Date.parse(row.usedAt);
+      const withinResumeWindow = Number.isFinite(startedAtMs) && (Date.now() - startedAtMs) <= RESUME_WINDOW_MS;
+      if (withinResumeWindow && row.usedByResultId) {
+        return res.json({
+          ok: true,
+          resumed: true,
+          redemptionToken: row.usedByResultId,
+          examStartedAt: row.examStartedAt,
+          examDeadline: new Date(startedAtMs + EXAM_DURATION_MS).toISOString()
+        });
+      }
+      return res.status(409).json({ error: 'That access code\'s exam session has expired. Ask your proctor for a new one.' });
+    }
+
     if (new Date(row.expiresAt).getTime() < Date.now()) return res.status(410).json({ error: 'That access code has expired. Ask your proctor for a new one.' });
 
     const redemptionToken = crypto.randomUUID();
@@ -501,6 +530,20 @@ app.post('/api/access-codes/redeem', async (req, res) => {
     });
 
     if (result.rowsAffected === 0) {
+      // Someone else redeemed it in the tiny window between our SELECT and
+      // UPDATE above. Re-check: if it was resolved with a resumable session,
+      // hand that back instead of a bare error.
+      const recheck = await db.execute({ sql: 'SELECT * FROM access_codes WHERE code = ?', args: [normalizedCode] });
+      const recheckRow = recheck.rows[0];
+      if (recheckRow && recheckRow.usedByResultId) {
+        return res.json({
+          ok: true,
+          resumed: true,
+          redemptionToken: recheckRow.usedByResultId,
+          examStartedAt: recheckRow.examStartedAt,
+          examDeadline: new Date(Date.parse(recheckRow.examStartedAt) + EXAM_DURATION_MS).toISOString()
+        });
+      }
       return res.status(409).json({ error: 'That access code has already been used.' });
     }
 
@@ -513,6 +556,53 @@ app.post('/api/access-codes/redeem', async (req, res) => {
   } catch (error) {
     console.error('Failed to redeem access code:', error);
     res.status(500).json({ error: 'Failed to validate access code. Please try again.' });
+  }
+});
+
+// ---------------------------------------------------------------------------
+// Exam start — records the real server-side clock time an exam began, so the
+// 60-minute limit can be enforced authoritatively at submission time rather
+// than trusting the browser's countdown alone. Calling this again for the
+// same (redemptionToken, examType) — e.g. because the student refreshed the
+// page — does NOT reset the clock; it just returns the original start time,
+// so refreshing never grants extra time.
+// ---------------------------------------------------------------------------
+app.post('/api/exams/:examType/start', async (req, res) => {
+  try {
+    const { examType } = req.params;
+    if (!EXAM_TYPES.includes(examType)) return res.status(400).json({ error: 'Invalid exam type.' });
+
+    const { redemptionToken } = req.body || {};
+    if (!redemptionToken || typeof redemptionToken !== 'string') {
+      return res.status(401).json({ error: 'Missing access code authorization. Please restart and enter your access code.' });
+    }
+
+    const codeResult = await db.execute({ sql: 'SELECT 1 FROM access_codes WHERE usedByResultId = ?', args: [redemptionToken] });
+    if (!codeResult.rows[0]) {
+      return res.status(401).json({ error: 'Your access code authorization is invalid. Please restart and enter your access code.' });
+    }
+
+    const nowIso = new Date().toISOString();
+    // INSERT OR IGNORE: if a start record already exists for this exam +
+    // token, this does nothing and we just read back the original time.
+    await db.execute({
+      sql: 'INSERT OR IGNORE INTO exam_attempts (redemptionToken, examType, startedAt) VALUES (?, ?, ?)',
+      args: [redemptionToken, examType, nowIso]
+    });
+
+    const existing = await db.execute({
+      sql: 'SELECT startedAt FROM exam_attempts WHERE redemptionToken = ? AND examType = ?',
+      args: [redemptionToken, examType]
+    });
+    const startedAt = existing.rows[0].startedAt;
+
+    res.json({
+      startedAt,
+      deadline: new Date(Date.parse(startedAt) + EXAM_DURATION_MS).toISOString()
+    });
+  } catch (error) {
+    console.error('Failed to start exam:', error);
+    res.status(500).json({ error: 'Failed to start exam. Please try again.' });
   }
 });
 
@@ -546,16 +636,17 @@ app.post('/api/exams/:examType/submit', async (req, res) => {
     const normalizedName = studentName.trim().toLowerCase();
     const normalizedQualification = qualification.trim().toLowerCase();
 
-    // These three reads don't depend on each other, so run them concurrently
+    // These four reads don't depend on each other, so run them concurrently
     // instead of one-after-another. Each round trip to Turso has real network
     // cost — doing this cuts submission latency roughly to a third.
-    const [codeResult, alreadyTaken, questionRows] = await Promise.all([
+    const [codeResult, alreadyTaken, questionRows, attemptResult] = await Promise.all([
       db.execute({ sql: 'SELECT * FROM access_codes WHERE usedByResultId = ?', args: [redemptionToken] }),
       db.execute({
         sql: 'SELECT id FROM results WHERE examType = ? AND studentNameNormalized = ? AND qualificationNormalized = ?',
         args: [examType, normalizedName, normalizedQualification]
       }),
-      db.execute({ sql: 'SELECT id, questionText, choiceA, choiceB, choiceC, choiceD, correctChoiceId FROM questions WHERE examType = ?', args: [examType] })
+      db.execute({ sql: 'SELECT id, questionText, choiceA, choiceB, choiceC, choiceD, correctChoiceId FROM questions WHERE examType = ?', args: [examType] }),
+      db.execute({ sql: 'SELECT startedAt FROM exam_attempts WHERE redemptionToken = ? AND examType = ?', args: [redemptionToken, examType] })
     ]);
 
     if (!codeResult.rows[0]) {
@@ -565,6 +656,17 @@ app.post('/api/exams/:examType/submit', async (req, res) => {
       return res.status(409).json({ error: `You have already completed the ${examType} exam. Only one attempt is allowed per exam.` });
     }
     if (!questionRows.rows.length) return res.status(400).json({ error: 'This exam has no questions yet.' });
+
+    // Server-side time limit check: the browser countdown is just a display —
+    // this is the real enforcement, using the start time this server recorded
+    // when the exam actually began (see /api/exams/:examType/start).
+    const attemptRow = attemptResult.rows[0];
+    if (attemptRow) {
+      const elapsedMs = Date.now() - Date.parse(attemptRow.startedAt);
+      if (elapsedMs > EXAM_DURATION_MS + SUBMIT_GRACE_MS) {
+        return res.status(408).json({ error: `The time limit for ${examType} has passed. Please contact staff for assistance.` });
+      }
+    }
 
     const answerDetails = buildAnswerDetails(questionRows.rows, answers);
     const score = answerDetails.filter(item => item.isCorrect).length;
@@ -622,6 +724,69 @@ app.get('/api/results', requireStaffAuth, async (req, res) => {
   } catch (error) {
     console.error('Failed to get results:', error);
     res.status(500).json({ error: 'Failed to load results.' });
+  }
+});
+
+app.get('/api/results/:id', requireStaffAuth, async (req, res) => {
+  try {
+    const result = await db.execute({ sql: 'SELECT * FROM results WHERE id = ?', args: [req.params.id] });
+    if (!result.rows[0]) return res.status(404).json({ error: 'Result not found.' });
+    res.json(rowToResult(result.rows[0]));
+  } catch (error) {
+    console.error('Failed to get result:', error);
+    res.status(500).json({ error: 'Failed to load result.' });
+  }
+});
+
+app.put('/api/results/:id', requireStaffAuth, async (req, res) => {
+  try {
+    const existingResult = await db.execute({ sql: 'SELECT * FROM results WHERE id = ?', args: [req.params.id] });
+    const existing = existingResult.rows[0];
+    if (!existing) return res.status(404).json({ error: 'Result not found.' });
+
+    const { studentName, age, sex, qualification, answers } = req.body || {};
+    if (!studentName || !age || !sex || !qualification || !Array.isArray(answers)) {
+      return res.status(400).json({ error: 'Missing required student information or answers.' });
+    }
+
+    const numericAge = Number(age);
+    if (!Number.isFinite(numericAge) || numericAge < 10 || numericAge > 80) {
+      return res.status(400).json({ error: 'Age must be between 10 and 80.' });
+    }
+    if (typeof studentName !== 'string' || studentName.trim().length > 200) {
+      return res.status(400).json({ error: 'Student name is invalid or too long.' });
+    }
+    if (!['Male', 'Female'].includes(sex)) return res.status(400).json({ error: 'Invalid sex value.' });
+    if (!QUALIFICATIONS.includes(qualification)) return res.status(400).json({ error: 'Invalid qualification.' });
+
+    const normalizedName = studentName.trim().toLowerCase();
+    const normalizedQualification = qualification.trim().toLowerCase();
+
+    const duplicate = await db.execute({
+      sql: 'SELECT id FROM results WHERE examType = ? AND studentNameNormalized = ? AND qualificationNormalized = ? AND id != ?',
+      args: [existing.examType, normalizedName, normalizedQualification, req.params.id]
+    });
+    if (duplicate.rows[0]) {
+      return res.status(409).json({ error: 'Another result already exists for this student and qualification.' });
+    }
+
+    const questionRows = await db.execute({ sql: 'SELECT id, questionText, choiceA, choiceB, choiceC, choiceD, correctChoiceId FROM questions WHERE examType = ?', args: [existing.examType] });
+    if (!questionRows.rows.length) return res.status(400).json({ error: 'This exam has no questions yet.' });
+
+    const answerDetails = buildAnswerDetails(questionRows.rows, answers);
+    const score = answerDetails.filter(item => item.isCorrect).length;
+    const rating = getRating(existing.examType, score);
+
+    await db.execute({
+      sql: `UPDATE results SET studentName = ?, studentNameNormalized = ?, age = ?, sex = ?, qualification = ?, qualificationNormalized = ?, score = ?, totalItems = ?, rating = ?, answersData = ? WHERE id = ?`,
+      args: [studentName.trim(), normalizedName, numericAge, sex, qualification, normalizedQualification, score, questionRows.rows.length, rating, JSON.stringify(answerDetails), req.params.id]
+    });
+
+    const updated = await db.execute({ sql: 'SELECT * FROM results WHERE id = ?', args: [req.params.id] });
+    res.json(rowToResult(updated.rows[0]));
+  } catch (error) {
+    console.error('Failed to update result:', error);
+    res.status(500).json({ error: 'Failed to update result.' });
   }
 });
 

@@ -68,6 +68,13 @@ async function initDb() {
       expiresAt TEXT NOT NULL,
       createdAt TEXT NOT NULL
     );
+
+    CREATE TABLE IF NOT EXISTS exam_attempts (
+      redemptionToken TEXT NOT NULL,
+      examType TEXT NOT NULL,
+      startedAt TEXT NOT NULL,
+      PRIMARY KEY (redemptionToken, examType)
+    );
   `);
 }
 

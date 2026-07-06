@@ -217,6 +217,10 @@
         redemptionToken = result.redemptionToken;
         step0Section.style.display = 'none';
         step1Section.style.display = 'block';
+        if (result.resumed) {
+          studentInfoWarning.textContent = 'Welcome back — resuming your exam session. Please re-enter your information to continue where you left off.';
+          studentInfoWarning.className = 'inline-note';
+        }
         window.scrollTo({ top: step1Section.offsetTop - 30, behavior: 'smooth' });
       } catch (error) {
         accessCodeWarning.textContent = error.message;
@@ -315,7 +319,19 @@
       examStatus.className = 'status-pill status-success';
 
       autoSubmitTriggered = false;
-      examDeadline = new Date(Date.now() + EXAM_DURATION_MS).toISOString();
+      // Ask the server for the real start time / deadline for this exam. The
+      // server only records this once per (code, exam) — if the student
+      // refreshed and is resuming, this returns the ORIGINAL start time, so
+      // the countdown correctly reflects time already used, not a fresh hour.
+      try {
+        const timing = await api.startExam(currentExamType, redemptionToken);
+        examDeadline = timing.deadline;
+      } catch (error) {
+        // Fall back to a client-side deadline so the student isn't blocked
+        // outright if this call fails — the server still enforces the real
+        // limit at submission time regardless of what the display shows.
+        examDeadline = new Date(Date.now() + EXAM_DURATION_MS).toISOString();
+      }
 
       renderProgressStepper();
       step2Section.style.display = 'block';
