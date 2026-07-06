@@ -311,13 +311,6 @@
                 </svg>
               </button>
               <div class="row-menu-dropdown" data-menu-dropdown data-id="${item.id}">
-                <button class="row-menu-item" type="button" data-action="edit" data-id="${item.id}">
-                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-                    <path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5Z" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/>
-                  </svg>
-                  Edit
-                </button>
-                <div class="row-menu-divider"></div>
                 <button class="row-menu-item danger" type="button" data-action="delete" data-id="${item.id}">
                   <svg width="16" height="16" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
                     <path d="M4 7h16M9 7V4.5A1.5 1.5 0 0 1 10.5 3h3A1.5 1.5 0 0 1 15 4.5V7m2 0-.7 12.1a2 2 0 0 1-2 1.9H9.7a2 2 0 0 1-2-1.9L7 7" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
@@ -379,9 +372,6 @@
             }
             return;
           }
-          if (action === 'edit') {
-            await openEditor(id);
-          }
         });
       });
     }
@@ -395,48 +385,6 @@
     document.addEventListener('keydown', event => {
       if (event.key === 'Escape') closeAllMenus();
     });
-
-    async function openEditor(resultId) {
-      const result = allResults.find(item => item.id === resultId);
-      if (!result) return;
-      const name = window.prompt('Edit student name', result.studentName);
-      if (name === null) return;
-      const age = window.prompt('Edit age', String(result.age));
-      if (age === null) return;
-      const sex = window.prompt('Edit sex (Male/Female)', result.sex);
-      if (sex === null) return;
-      const qualification = window.prompt('Edit qualification', result.qualification);
-      if (qualification === null) return;
-
-      const answers = [];
-      for (const item of result.answers || []) {
-        const current = item.selectedChoice || '';
-        const answerInput = window.prompt(`Edit answer for: ${item.questionText}\nCurrent: ${current || 'No answer'}\nEnter A, B, C, D, or leave blank`, current);
-        if (answerInput === null) return;
-        const normalized = (answerInput || '').trim().toUpperCase();
-        answers.push({
-          questionId: item.questionId,
-          selectedChoice: ['A', 'B', 'C', 'D'].includes(normalized) ? normalized : null
-        });
-      }
-
-      const payload = {
-        studentName: name.trim(),
-        age: Number(age),
-        sex,
-        qualification,
-        answers
-      };
-      try {
-        const updated = await api.updateResult(resultId, payload);
-        const index = allResults.findIndex(item => item.id === resultId);
-        if (index >= 0) allResults[index] = updated;
-        renderSummary();
-        alert('Result updated successfully.');
-      } catch (error) {
-        alert(error.message);
-      }
-    }
 
     searchBox.addEventListener('input', () => {
       searchTerm = searchBox.value.trim();
