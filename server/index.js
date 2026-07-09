@@ -16,7 +16,8 @@ const {
   TableRow,
   TableCell,
   WidthType,
-  ShadingType
+  ShadingType,
+  BorderStyle
 } = require('docx');
 
 const { db, IMAGES_DIR } = require('./db');
@@ -301,10 +302,53 @@ function docxMetaTable(result) {
   });
 }
 
+function docxChoiceCell(choice, answer) {
+  const isCorrect = choice.id === answer.correctChoiceId;
+  const isSelected = choice.id === answer.selectedChoice;
+  let color;
+  let bold = false;
+  let marker = '';
+  if (isCorrect) { marker = '✓ '; color = '2D6A4F'; bold = true; }
+  else if (isSelected) { marker = '✗ '; color = 'B02A37'; bold = true; }
+
+  const runs = [new TextRun({ text: `${marker}${choice.id}. ${choice.text}`, color, bold, size: 20 })];
+  if (isSelected) {
+    runs.push(new TextRun({ text: '  (answer)', italics: true, size: 16, color: isCorrect ? '2D6A4F' : 'B02A37' }));
+  }
+
+  const cellOptions = {
+    width: { size: 50, type: WidthType.PERCENTAGE },
+    margins: { top: 80, bottom: 80, left: 120, right: 120 },
+    children: [new Paragraph({ children: runs })]
+  };
+  if (isCorrect) {
+    cellOptions.shading = { type: ShadingType.CLEAR, color: 'auto', fill: 'E9F9EF' };
+  } else if (isSelected) {
+    cellOptions.shading = { type: ShadingType.CLEAR, color: 'auto', fill: 'FDECEC' };
+  }
+  return new TableCell(cellOptions);
+}
+
+// Choices laid out 2-per-row (A/B on top, C/D below) instead of stacked
+// vertically — keeps each question compact so more of them fit per page.
+function docxChoicesTable(answer) {
+  const choices = answer.choices || [];
+  const rows = [];
+  for (let i = 0; i < choices.length; i += 2) {
+    const pair = choices.slice(i, i + 2);
+    rows.push(new TableRow({
+      children: pair.length === 2
+        ? [docxChoiceCell(pair[0], answer), docxChoiceCell(pair[1], answer)]
+        : [docxChoiceCell(pair[0], answer)]
+    }));
+  }
+  return new Table({ width: { size: 100, type: WidthType.PERCENTAGE }, rows });
+}
+
 function docxQuestionBlock(answer, index, imageMap) {
   const children = [
     new Paragraph({
-      spacing: { before: 260, after: 100 },
+      spacing: { before: 220, after: 80 },
       children: [
         new TextRun({ text: `Q${index + 1}. `, bold: true }),
         new TextRun({ text: answer.questionText })
@@ -315,7 +359,7 @@ function docxQuestionBlock(answer, index, imageMap) {
   const image = imageMap && imageMap.get(answer.questionId);
   if (image) {
     children.push(new Paragraph({
-      spacing: { after: 160 },
+      spacing: { after: 100 },
       children: [
         new ImageRun({
           data: image.buffer,
@@ -325,72 +369,60 @@ function docxQuestionBlock(answer, index, imageMap) {
     }));
   }
 
-  answer.choices.forEach(choice => {
-    const isCorrect = choice.id === answer.correctChoiceId;
-    const isSelected = choice.id === answer.selectedChoice;
-    let marker = '   ';
-    let color;
-    let bold = false;
-    if (isCorrect) { marker = ' ✓ '; color = '2D6A4F'; bold = true; }
-    else if (isSelected) { marker = ' ✗ '; color = 'B02A37'; bold = true; }
-
-    const runs = [new TextRun({ text: `${marker}${choice.id}. ${choice.text}`, color, bold })];
-    if (isSelected) {
-      runs.push(new TextRun({
-        text: '  (student\u2019s answer)',
-        italics: true,
-        color: isCorrect ? '2D6A4F' : 'B02A37'
-      }));
-    }
-    children.push(new Paragraph({ indent: { left: 360 }, spacing: { after: 60 }, children: runs }));
-  });
+  children.push(docxChoicesTable(answer));
 
   const verdictText = answer.isCorrect
     ? 'Result: Correct'
     : (answer.selectedChoice ? 'Result: Incorrect' : 'Result: No answer given');
   children.push(new Paragraph({
-    spacing: { after: 60 },
-    children: [new TextRun({ text: verdictText, bold: true, color: answer.isCorrect ? '166534' : '991B1B' })]
+    spacing: { before: 80, after: 40 },
+    children: [new TextRun({ text: verdictText, bold: true, size: 20, color: answer.isCorrect ? '166534' : '991B1B' })]
   }));
 
   return children;
 }
 
 async function buildResultsDocxBuffer(results, imageMap) {
-  const sections = results.map((result, resultIndex) => {
-    const children = [
-      new Paragraph({
-        heading: HeadingLevel.HEADING_1,
-        spacing: { after: 80 },
-        children: [new TextRun({ text: `${result.studentName} — ${result.examType}` })]
-      }),
-      new Paragraph({
-        spacing: { after: 200 },
-        children: [new TextRun({ text: 'PTC-Catanduanes Exam System — Staff Review', italics: true, color: '52606D' })]
-      }),
-      docxMetaTable(result),
-      new Paragraph({
-        heading: HeadingLevel.HEADING_2,
-        spacing: { before: 320, after: 160 },
-        children: [new TextRun({ text: 'Item-by-Item Review' })]
-      })
-    ];
+  const children = [];
+
+  results.forEach((result, resultIndex) => {
+    if (resultIndex > 0) {
+      // A subtle divider between students instead of a forced page break —
+      // short results now simply continue on the same page rather than
+      // leaving the rest of a page blank.
+      children.push(new Paragraph({
+        spacing: { before: 260, after: 260 },
+        border: { bottom: { color: 'CBD5E1', space: 4, style: BorderStyle.SINGLE, size: 8 } },
+        children: []
+      }));
+    }
+
+    children.push(new Paragraph({
+      heading: HeadingLevel.HEADING_1,
+      spacing: { after: 80 },
+      children: [new TextRun({ text: `${result.studentName} — ${result.examType}` })]
+    }));
+    children.push(new Paragraph({
+      spacing: { after: 200 },
+      children: [new TextRun({ text: 'PTC-Catanduanes Exam System — Staff Review', italics: true, color: '52606D' })]
+    }));
+    children.push(docxMetaTable(result));
+    children.push(new Paragraph({
+      heading: HeadingLevel.HEADING_2,
+      spacing: { before: 300, after: 140 },
+      children: [new TextRun({ text: 'Item-by-Item Review' })]
+    }));
 
     if (!result.answers.length) {
       children.push(new Paragraph({ text: 'No answer data was recorded for this attempt.' }));
     } else {
       result.answers.forEach((answer, idx) => children.push(...docxQuestionBlock(answer, idx, imageMap)));
     }
-
-    return {
-      properties: resultIndex > 0 ? { type: 'nextPage' } : {},
-      children
-    };
   });
 
   const doc = new Document({
     styles: { default: { document: { run: { font: 'Calibri', size: 22 } } } },
-    sections
+    sections: [{ children }]
   });
 
   return Packer.toBuffer(doc);
