@@ -244,8 +244,8 @@ async function loadQuestionImageForDocx(row) {
     // not a full-size reproduction, so multi-student exports don't balloon
     // into dozens of pages. Width capped first, then height capped too (for
     // tall/portrait images), preserving aspect ratio either way.
-    const maxWidth = 260;
-    const maxHeight = 220;
+    const maxWidth = 210;
+    const maxHeight = 170;
     const metadata = await sharp(sourceBuffer).metadata();
     const naturalWidth = metadata.width || maxWidth;
     const naturalHeight = metadata.height || maxHeight;
@@ -302,47 +302,25 @@ function docxMetaTable(result) {
   });
 }
 
-function docxChoiceCell(choice, answer) {
+function docxChoiceParagraph(choice, answer) {
   const isCorrect = choice.id === answer.correctChoiceId;
   const isSelected = choice.id === answer.selectedChoice;
   let color;
   let bold = false;
-  let marker = '';
-  if (isCorrect) { marker = '✓ '; color = '2D6A4F'; bold = true; }
-  else if (isSelected) { marker = '✗ '; color = 'B02A37'; bold = true; }
+  let marker = '   ';
+  if (isCorrect) { marker = ' ✓ '; color = '2D6A4F'; bold = true; }
+  else if (isSelected) { marker = ' ✗ '; color = 'B02A37'; bold = true; }
 
   const runs = [new TextRun({ text: `${marker}${choice.id}. ${choice.text}`, color, bold, size: 20 })];
   if (isSelected) {
     runs.push(new TextRun({ text: '  (answer)', italics: true, size: 16, color: isCorrect ? '2D6A4F' : 'B02A37' }));
   }
 
-  const cellOptions = {
-    width: { size: 50, type: WidthType.PERCENTAGE },
-    margins: { top: 80, bottom: 80, left: 120, right: 120 },
-    children: [new Paragraph({ children: runs })]
-  };
-  if (isCorrect) {
-    cellOptions.shading = { type: ShadingType.CLEAR, color: 'auto', fill: 'E9F9EF' };
-  } else if (isSelected) {
-    cellOptions.shading = { type: ShadingType.CLEAR, color: 'auto', fill: 'FDECEC' };
-  }
-  return new TableCell(cellOptions);
-}
+  const paragraphOptions = { indent: { left: 200 }, spacing: { after: 40 }, children: runs };
+  if (isCorrect) paragraphOptions.shading = { type: ShadingType.CLEAR, color: 'auto', fill: 'E9F9EF' };
+  else if (isSelected) paragraphOptions.shading = { type: ShadingType.CLEAR, color: 'auto', fill: 'FDECEC' };
 
-// Choices laid out 2-per-row (A/B on top, C/D below) instead of stacked
-// vertically — keeps each question compact so more of them fit per page.
-function docxChoicesTable(answer) {
-  const choices = answer.choices || [];
-  const rows = [];
-  for (let i = 0; i < choices.length; i += 2) {
-    const pair = choices.slice(i, i + 2);
-    rows.push(new TableRow({
-      children: pair.length === 2
-        ? [docxChoiceCell(pair[0], answer), docxChoiceCell(pair[1], answer)]
-        : [docxChoiceCell(pair[0], answer)]
-    }));
-  }
-  return new Table({ width: { size: 100, type: WidthType.PERCENTAGE }, rows });
+  return new Paragraph(paragraphOptions);
 }
 
 function docxQuestionBlock(answer, index, imageMap) {
@@ -369,7 +347,7 @@ function docxQuestionBlock(answer, index, imageMap) {
     }));
   }
 
-  children.push(docxChoicesTable(answer));
+  answer.choices.forEach(choice => children.push(docxChoiceParagraph(choice, answer)));
 
   const verdictText = answer.isCorrect
     ? 'Result: Correct'
@@ -422,7 +400,12 @@ async function buildResultsDocxBuffer(results, imageMap) {
 
   const doc = new Document({
     styles: { default: { document: { run: { font: 'Calibri', size: 22 } } } },
-    sections: [{ children }]
+    sections: [{
+      properties: {
+        column: { count: 2, space: 400 }
+      },
+      children
+    }]
   });
 
   return Packer.toBuffer(doc);
