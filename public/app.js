@@ -457,6 +457,7 @@ function renderAnswerReviewItem(answer, index) {
         <span class="answer-indicator ${isCorrect ? 'correct' : 'wrong'}">${isCorrect ? 'Correct' : (answer.selectedChoice ? 'Incorrect' : 'No answer')}</span>
       </div>
       <p class="answer-question">${answer.questionText}</p>
+      ${answer.imageUrl ? `<img src="${answer.imageUrl}" alt="Question image" style="margin:0 0 1rem; border-radius:14px; max-height:220px; object-fit:contain;" />` : ''}
       <div class="answer-choices">${choicesHtml}</div>
     </article>
   `;

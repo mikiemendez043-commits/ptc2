@@ -10,6 +10,7 @@ const {
   Packer,
   Paragraph,
   TextRun,
+  ImageRun,
   HeadingLevel,
   Table,
   TableRow,
@@ -220,6 +221,36 @@ function buildAnswerDetails(questionRows, answers) {
   });
 }
 
+// Loads a single question's image as a resized PNG buffer, ready to embed in
+// the exported Word document. Handles both storage styles used elsewhere in
+// this file: base64 imageData (current) and legacy on-disk imagePath. Sized
+// down to keep the export small regardless of how many students are included.
+// Returns null (never throws) if there's no image or it can't be read, so a
+// missing/corrupt image never breaks the whole export.
+async function loadQuestionImageForDocx(row) {
+  try {
+    let sourceBuffer = null;
+    if (row.imageData) {
+      const match = /^data:([^;]+);base64,(.+)$/.exec(row.imageData);
+      if (match) sourceBuffer = Buffer.from(match[2], 'base64');
+    } else if (row.imagePath) {
+      const filePath = path.join(IMAGES_DIR, row.imagePath);
+      if (fs.existsSync(filePath)) sourceBuffer = fs.readFileSync(filePath);
+    }
+    if (!sourceBuffer) return null;
+
+    const maxWidth = 420;
+    const metadata = await sharp(sourceBuffer).metadata();
+    const width = Math.min(metadata.width || maxWidth, maxWidth);
+    const height = metadata.width ? Math.round((metadata.height / metadata.width) * width) : width;
+    const pngBuffer = await sharp(sourceBuffer).resize({ width }).png().toBuffer();
+    return { buffer: pngBuffer, width, height };
+  } catch (e) {
+    console.error('Failed to load question image for Word export:', e);
+    return null;
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Word document export — builds one nicely formatted "review" page per
 // selected result (student + exam type), showing every question with the
@@ -257,7 +288,7 @@ function docxMetaTable(result) {
   });
 }
 
-function docxQuestionBlock(answer, index) {
+function docxQuestionBlock(answer, index, imageMap) {
   const children = [
     new Paragraph({
       spacing: { before: 260, after: 100 },
@@ -267,6 +298,19 @@ function docxQuestionBlock(answer, index) {
       ]
     })
   ];
+
+  const image = imageMap && imageMap.get(answer.questionId);
+  if (image) {
+    children.push(new Paragraph({
+      spacing: { after: 160 },
+      children: [
+        new ImageRun({
+          data: image.buffer,
+          transformation: { width: image.width, height: image.height }
+        })
+      ]
+    }));
+  }
 
   answer.choices.forEach(choice => {
     const isCorrect = choice.id === answer.correctChoiceId;
@@ -299,7 +343,7 @@ function docxQuestionBlock(answer, index) {
   return children;
 }
 
-async function buildResultsDocxBuffer(results) {
+async function buildResultsDocxBuffer(results, imageMap) {
   const sections = results.map((result, resultIndex) => {
     const children = [
       new Paragraph({
@@ -322,7 +366,7 @@ async function buildResultsDocxBuffer(results) {
     if (!result.answers.length) {
       children.push(new Paragraph({ text: 'No answer data was recorded for this attempt.' }));
     } else {
-      result.answers.forEach((answer, idx) => children.push(...docxQuestionBlock(answer, idx)));
+      result.answers.forEach((answer, idx) => children.push(...docxQuestionBlock(answer, idx, imageMap)));
     }
 
     return {
@@ -862,7 +906,31 @@ app.get('/api/results/:id', requireStaffAuth, async (req, res) => {
   try {
     const result = await db.execute({ sql: 'SELECT * FROM results WHERE id = ?', args: [req.params.id] });
     if (!result.rows[0]) return res.status(404).json({ error: 'Result not found.' });
-    res.json(rowToResult(result.rows[0]));
+    const resultData = rowToResult(result.rows[0]);
+
+    // answersData never stores images (that was the source of the earlier memory
+    // crash), so for the staff review view we look up each question's CURRENT
+    // image status live and hand back a URL — the browser fetches the actual
+    // bytes separately from /api/questions/:id/image, only when this one result
+    // is being reviewed. Nothing large ever sits in this JSON response.
+    const questionIds = Array.from(new Set(resultData.answers.map(a => a.questionId).filter(Boolean)));
+    if (questionIds.length) {
+      const placeholders = questionIds.map(() => '?').join(',');
+      const qResult = await db.execute({
+        sql: `SELECT id, updatedAt, CASE WHEN imageData IS NOT NULL OR imagePath IS NOT NULL THEN 1 ELSE 0 END AS hasImage
+              FROM questions WHERE id IN (${placeholders})`,
+        args: questionIds
+      });
+      const infoById = new Map(qResult.rows.map(row => [row.id, row]));
+      resultData.answers = resultData.answers.map(answer => {
+        const info = infoById.get(answer.questionId);
+        if (!info || !info.hasImage) return { ...answer, imageUrl: null };
+        const version = info.updatedAt ? `?v=${encodeURIComponent(info.updatedAt)}` : '';
+        return { ...answer, imageUrl: `/api/questions/${answer.questionId}/image${version}` };
+      });
+    }
+
+    res.json(resultData);
   } catch (error) {
     console.error('Failed to get result:', error);
     res.status(500).json({ error: 'Failed to load result.' });
@@ -959,7 +1027,26 @@ app.post('/api/results/export-docx', requireStaffAuth, async (req, res) => {
 
     results.sort((a, b) => a.studentName.localeCompare(b.studentName) || a.examType.localeCompare(b.examType));
 
-    const buffer = await buildResultsDocxBuffer(results);
+    // Load each distinct question's image ONCE, no matter how many selected
+    // students answered it — keeps a 150-result export bounded by the size of
+    // the question bank (at most ~100 questions), not the number of students.
+    const questionIds = Array.from(new Set(
+      results.flatMap(r => r.answers.map(a => a.questionId)).filter(Boolean)
+    ));
+    const imageMap = new Map();
+    if (questionIds.length) {
+      const placeholders = questionIds.map(() => '?').join(',');
+      const questionRows = await db.execute({
+        sql: `SELECT id, imageData, imagePath FROM questions WHERE id IN (${placeholders})`,
+        args: questionIds
+      });
+      for (const row of questionRows.rows) {
+        const image = await loadQuestionImageForDocx(row);
+        if (image) imageMap.set(row.id, image);
+      }
+    }
+
+    const buffer = await buildResultsDocxBuffer(results, imageMap);
     const filename = `exam-results-review-${new Date().toISOString().slice(0, 10)}.docx`;
     res.set('Content-Type', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document');
     res.set('Content-Disposition', `attachment; filename="${filename}"`);
