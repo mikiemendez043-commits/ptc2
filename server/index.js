@@ -239,11 +239,24 @@ async function loadQuestionImageForDocx(row) {
     }
     if (!sourceBuffer) return null;
 
-    const maxWidth = 420;
+    // Kept small on purpose — this is a reference thumbnail for the question,
+    // not a full-size reproduction, so multi-student exports don't balloon
+    // into dozens of pages. Width capped first, then height capped too (for
+    // tall/portrait images), preserving aspect ratio either way.
+    const maxWidth = 260;
+    const maxHeight = 220;
     const metadata = await sharp(sourceBuffer).metadata();
-    const width = Math.min(metadata.width || maxWidth, maxWidth);
-    const height = metadata.width ? Math.round((metadata.height / metadata.width) * width) : width;
-    const pngBuffer = await sharp(sourceBuffer).resize({ width }).png().toBuffer();
+    const naturalWidth = metadata.width || maxWidth;
+    const naturalHeight = metadata.height || maxHeight;
+
+    let width = Math.min(naturalWidth, maxWidth);
+    let height = Math.round((naturalHeight / naturalWidth) * width);
+    if (height > maxHeight) {
+      height = maxHeight;
+      width = Math.round((naturalWidth / naturalHeight) * height);
+    }
+
+    const pngBuffer = await sharp(sourceBuffer).resize({ width }).png({ quality: 70 }).toBuffer();
     return { buffer: pngBuffer, width, height };
   } catch (e) {
     console.error('Failed to load question image for Word export:', e);
