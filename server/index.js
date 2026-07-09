@@ -5,6 +5,18 @@ const express = require('express');
 const session = require('express-session');
 const multer = require('multer');
 const sharp = require('sharp');
+const {
+  Document,
+  Packer,
+  Paragraph,
+  TextRun,
+  HeadingLevel,
+  Table,
+  TableRow,
+  TableCell,
+  WidthType,
+  ShadingType
+} = require('docx');
 
 const { db, IMAGES_DIR } = require('./db');
 const { requireStaffAuth } = require('./auth');
@@ -206,6 +218,125 @@ function buildAnswerDetails(questionRows, answers) {
       isCorrect: selectedChoice === row.correctChoiceId
     };
   });
+}
+
+// ---------------------------------------------------------------------------
+// Word document export — builds one nicely formatted "review" page per
+// selected result (student + exam type), showing every question with the
+// student's answer and the correct answer marked, Google-Forms-review style.
+// ---------------------------------------------------------------------------
+function docxMetaTable(result) {
+  const rows = [
+    ['Student Name', result.studentName],
+    ['Qualification', result.qualification],
+    ['School', result.school],
+    ['Age / Sex', `${result.age} / ${result.sex}`],
+    ['Exam Type', result.examType],
+    ['Date Taken', new Date(result.dateTaken).toLocaleString('en-US', { year: 'numeric', month: 'long', day: 'numeric', hour: 'numeric', minute: '2-digit' })],
+    ['Score', `${result.score} / ${result.totalItems}`],
+    ['Rating', result.rating]
+  ];
+
+  return new Table({
+    width: { size: 100, type: WidthType.PERCENTAGE },
+    rows: rows.map(([label, value]) => new TableRow({
+      children: [
+        new TableCell({
+          width: { size: 28, type: WidthType.PERCENTAGE },
+          shading: { type: ShadingType.CLEAR, color: 'auto', fill: 'F1F5F9' },
+          margins: { top: 100, bottom: 100, left: 150, right: 150 },
+          children: [new Paragraph({ children: [new TextRun({ text: label, bold: true, size: 20 })] })]
+        }),
+        new TableCell({
+          width: { size: 72, type: WidthType.PERCENTAGE },
+          margins: { top: 100, bottom: 100, left: 150, right: 150 },
+          children: [new Paragraph({ children: [new TextRun({ text: String(value), size: 20 })] })]
+        })
+      ]
+    }))
+  });
+}
+
+function docxQuestionBlock(answer, index) {
+  const children = [
+    new Paragraph({
+      spacing: { before: 260, after: 100 },
+      children: [
+        new TextRun({ text: `Q${index + 1}. `, bold: true }),
+        new TextRun({ text: answer.questionText })
+      ]
+    })
+  ];
+
+  answer.choices.forEach(choice => {
+    const isCorrect = choice.id === answer.correctChoiceId;
+    const isSelected = choice.id === answer.selectedChoice;
+    let marker = '   ';
+    let color;
+    let bold = false;
+    if (isCorrect) { marker = ' ✓ '; color = '2D6A4F'; bold = true; }
+    else if (isSelected) { marker = ' ✗ '; color = 'B02A37'; bold = true; }
+
+    const runs = [new TextRun({ text: `${marker}${choice.id}. ${choice.text}`, color, bold })];
+    if (isSelected) {
+      runs.push(new TextRun({
+        text: '  (student\u2019s answer)',
+        italics: true,
+        color: isCorrect ? '2D6A4F' : 'B02A37'
+      }));
+    }
+    children.push(new Paragraph({ indent: { left: 360 }, spacing: { after: 60 }, children: runs }));
+  });
+
+  const verdictText = answer.isCorrect
+    ? 'Result: Correct'
+    : (answer.selectedChoice ? 'Result: Incorrect' : 'Result: No answer given');
+  children.push(new Paragraph({
+    spacing: { after: 60 },
+    children: [new TextRun({ text: verdictText, bold: true, color: answer.isCorrect ? '166534' : '991B1B' })]
+  }));
+
+  return children;
+}
+
+async function buildResultsDocxBuffer(results) {
+  const sections = results.map((result, resultIndex) => {
+    const children = [
+      new Paragraph({
+        heading: HeadingLevel.HEADING_1,
+        spacing: { after: 80 },
+        children: [new TextRun({ text: `${result.studentName} — ${result.examType}` })]
+      }),
+      new Paragraph({
+        spacing: { after: 200 },
+        children: [new TextRun({ text: 'PTC-Catanduanes Exam System — Staff Review', italics: true, color: '52606D' })]
+      }),
+      docxMetaTable(result),
+      new Paragraph({
+        heading: HeadingLevel.HEADING_2,
+        spacing: { before: 320, after: 160 },
+        children: [new TextRun({ text: 'Item-by-Item Review' })]
+      })
+    ];
+
+    if (!result.answers.length) {
+      children.push(new Paragraph({ text: 'No answer data was recorded for this attempt.' }));
+    } else {
+      result.answers.forEach((answer, idx) => children.push(...docxQuestionBlock(answer, idx)));
+    }
+
+    return {
+      properties: resultIndex > 0 ? { type: 'nextPage' } : {},
+      children
+    };
+  });
+
+  const doc = new Document({
+    styles: { default: { document: { run: { font: 'Calibri', size: 22 } } } },
+    sections
+  });
+
+  return Packer.toBuffer(doc);
 }
 
 // Lightweight question mapper used for list views (student exam, question bank list).
@@ -799,6 +930,43 @@ app.delete('/api/results/:id', requireStaffAuth, async (req, res) => {
   } catch (error) {
     console.error('Failed to delete result:', error);
     res.status(500).json({ error: 'Failed to delete result.' });
+  }
+});
+
+// Bulk export: staff select one or more students (all their completed exam
+// results) and get back a single .docx with a clean, printable per-question
+// review for each selected result — correct answer and the student's answer
+// both marked, one student/exam per page.
+app.post('/api/results/export-docx', requireStaffAuth, async (req, res) => {
+  try {
+    const { resultIds } = req.body || {};
+    if (!Array.isArray(resultIds) || !resultIds.length) {
+      return res.status(400).json({ error: 'No results were selected.' });
+    }
+    if (resultIds.length > 150) {
+      return res.status(400).json({ error: 'Please select 150 or fewer results at a time.' });
+    }
+
+    // Fetched one at a time (same principle as the answersData cleanup script) so
+    // memory usage never grows with the number of results being exported.
+    const results = [];
+    for (const id of resultIds) {
+      if (typeof id !== 'string') continue;
+      const row = await db.execute({ sql: 'SELECT * FROM results WHERE id = ?', args: [id] });
+      if (row.rows[0]) results.push(rowToResult(row.rows[0]));
+    }
+    if (!results.length) return res.status(404).json({ error: 'None of the selected results could be found.' });
+
+    results.sort((a, b) => a.studentName.localeCompare(b.studentName) || a.examType.localeCompare(b.examType));
+
+    const buffer = await buildResultsDocxBuffer(results);
+    const filename = `exam-results-review-${new Date().toISOString().slice(0, 10)}.docx`;
+    res.set('Content-Type', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document');
+    res.set('Content-Disposition', `attachment; filename="${filename}"`);
+    res.send(buffer);
+  } catch (error) {
+    console.error('Failed to export results to Word:', error);
+    res.status(500).json({ error: 'Failed to generate the Word document.' });
   }
 });
 

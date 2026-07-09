@@ -39,9 +39,18 @@
             <select id="yearOnlySelect" class="search-input" style="width:auto; font-size:0.88rem; padding:6px 10px;"></select>
           </div>
           <button class="button button-ghost" id="clearFilterButton" type="button" style="padding:6px 14px; font-size:0.85rem;">Clear</button>
+          <button class="button button-secondary" id="toggleSelectButton" type="button" style="padding:6px 14px; font-size:0.85rem;">Select</button>
         </div>
       </div>
+      <p class="inline-note" style="margin-bottom:1rem;">Click a student's score to review that exam question-by-question. Use <strong>Select</strong> to choose students and generate a Word document of their results.</p>
       <div id="detailContent"><p class="inline-note">Loading...</p></div>
+      <div class="selection-toolbar" id="selectionToolbar" style="display:none;">
+        <span id="selectionCount">0 students selected</span>
+        <div class="flex-gap">
+          <button class="button button-ghost toolbar-cancel" id="clearSelectionButton" type="button">Clear</button>
+          <button class="button button-secondary" id="generateDocxButton" type="button" disabled>Generate Word Document</button>
+        </div>
+      </div>
     </section>
   </main>
 
@@ -60,12 +69,23 @@
     const yearFilterWrap = document.getElementById('yearFilterWrap');
     const yearOnlySelect = document.getElementById('yearOnlySelect');
     const clearFilterButton = document.getElementById('clearFilterButton');
+    const toggleSelectButton = document.getElementById('toggleSelectButton');
+    const selectionToolbar = document.getElementById('selectionToolbar');
+    const selectionCount = document.getElementById('selectionCount');
+    const clearSelectionButton = document.getElementById('clearSelectionButton');
+    const generateDocxButton = document.getElementById('generateDocxButton');
 
     const MONTHS = ['January','February','March','April','May','June','July','August','September','October','November','December'];
 
     let qualification = null;
     let examTypes = [];
     let detailData = null; // cached fetch result, so filtering never re-fetches
+
+    // Selection state for bulk Word-document export. Keyed by studentName —
+    // safe because a student's name is unique within a single qualification
+    // (enforced by the DB's unique index on examType+name+qualification).
+    let selectMode = false;
+    let selectedNames = new Set();
 
     function yearRange() {
       const now = new Date();
@@ -168,6 +188,10 @@
       });
     }
 
+    function escapeAttr(value) {
+      return String(value).replace(/&/g, '&amp;').replace(/"/g, '&quot;');
+    }
+
     function renderTable() {
       if (!detailData) return;
       const filter = getCurrentFilter();
@@ -175,6 +199,7 @@
 
       if (!students.length) {
         detailContent.innerHTML = '<p class="inline-note">No students match this filter.</p>';
+        renderSelectionToolbar();
         return;
       }
 
@@ -182,6 +207,7 @@
         <table>
           <thead>
             <tr>
+              ${selectMode ? '<th style="width:2.5rem;"><input type="checkbox" class="select-checkbox" id="selectAllCheckbox" aria-label="Select all visible students"></th>' : ''}
               <th>Name</th>
               <th>Age</th>
               <th>Sex</th>
@@ -192,13 +218,14 @@
           <tbody>
             ${students.map((student, index) => `
               <tr data-student-index="${index}">
+                ${selectMode ? `<td><input type="checkbox" class="select-checkbox" data-student-name="${escapeAttr(student.studentName)}" ${selectedNames.has(student.studentName) ? 'checked' : ''} aria-label="Select ${escapeAttr(student.studentName)}"></td>` : ''}
                 <td>${student.studentName}</td>
                 <td>${student.age}</td>
                 <td>${student.sex}</td>
                 ${examTypes.map(type => {
                   const r = student.results[type];
                   if (!r) return '<td class="inline-note">Not taken</td>';
-                  return `<td>${r.score}/${r.totalItems} (${r.rating})</td>`;
+                  return `<td><button class="link-button" type="button" data-review-id="${r.id}" title="Review this exam question-by-question">${r.score}/${r.totalItems} (${r.rating})</button></td>`;
                 }).join('')}
                 <td>
                   <button class="button button-danger delete-student-row" type="button" data-student-index="${index}" style="padding:0.4rem 0.8rem; font-size:0.82rem;">Delete</button>
@@ -208,6 +235,35 @@
           </tbody>
         </table>
       `;
+
+      // "Review" — opens the shared per-question review modal (defined in app.js).
+      detailContent.querySelectorAll('[data-review-id]').forEach(button => {
+        button.addEventListener('click', () => openReviewModal(button.getAttribute('data-review-id')));
+      });
+
+      // Selection checkboxes (only present in select mode).
+      if (selectMode) {
+        const visibleNames = students.map(s => s.studentName);
+        const selectAllCheckbox = document.getElementById('selectAllCheckbox');
+        if (selectAllCheckbox) {
+          selectAllCheckbox.checked = visibleNames.length > 0 && visibleNames.every(name => selectedNames.has(name));
+          selectAllCheckbox.addEventListener('change', () => {
+            if (selectAllCheckbox.checked) {
+              visibleNames.forEach(name => selectedNames.add(name));
+            } else {
+              visibleNames.forEach(name => selectedNames.delete(name));
+            }
+            renderTable();
+          });
+        }
+        detailContent.querySelectorAll('.select-checkbox[data-student-name]').forEach(checkbox => {
+          checkbox.addEventListener('change', () => {
+            const name = checkbox.getAttribute('data-student-name');
+            if (checkbox.checked) selectedNames.add(name); else selectedNames.delete(name);
+            renderSelectionToolbar();
+          });
+        });
+      }
 
       detailContent.querySelectorAll('.delete-student-row').forEach(button => {
         button.addEventListener('click', async () => {
@@ -224,6 +280,7 @@
             for (const id of resultIds) {
               await api.deleteResult(id);
             }
+            selectedNames.delete(student.studentName);
             detailData = await api.getQualificationDetail(qualification);
             renderTable();
           } catch (error) {
@@ -233,7 +290,64 @@
           }
         });
       });
+
+      renderSelectionToolbar();
     }
+
+    // ── Select mode: toggle, toolbar, and Word-document generation ──────────
+    function renderSelectionToolbar() {
+      if (!selectMode) {
+        selectionToolbar.style.display = 'none';
+        return;
+      }
+      selectionToolbar.style.display = 'flex';
+      const count = selectedNames.size;
+      selectionCount.textContent = `${count} student${count === 1 ? '' : 's'} selected`;
+      generateDocxButton.disabled = count === 0;
+    }
+
+    toggleSelectButton.addEventListener('click', () => {
+      selectMode = !selectMode;
+      if (!selectMode) selectedNames.clear();
+      toggleSelectButton.textContent = selectMode ? 'Cancel Select' : 'Select';
+      toggleSelectButton.classList.toggle('button-primary', selectMode);
+      toggleSelectButton.classList.toggle('button-secondary', !selectMode);
+      renderTable();
+    });
+
+    clearSelectionButton.addEventListener('click', () => {
+      selectedNames.clear();
+      renderTable();
+    });
+
+    generateDocxButton.addEventListener('click', async () => {
+      if (!selectedNames.size || !detailData) return;
+
+      const resultIds = [];
+      detailData.students.forEach(student => {
+        if (!selectedNames.has(student.studentName)) return;
+        examTypes.forEach(type => {
+          const r = student.results[type];
+          if (r && r.id) resultIds.push(r.id);
+        });
+      });
+
+      if (!resultIds.length) {
+        alert('The selected students have no completed exam results to export.');
+        return;
+      }
+
+      setButtonLoading(generateDocxButton, true, 'Generating...');
+      try {
+        const blob = await api.exportResultsToDocx(resultIds);
+        const safeQualification = qualification.replace(/[^a-z0-9]+/gi, '-').toLowerCase();
+        downloadBlob(`${safeQualification}-exam-review.docx`, blob);
+      } catch (error) {
+        alert(error.message);
+      } finally {
+        setButtonLoading(generateDocxButton, false);
+      }
+    });
 
     filterTypeSelect.addEventListener('change', () => {
       updateFilterVisibility();

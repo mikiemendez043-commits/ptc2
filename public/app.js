@@ -94,6 +94,19 @@ const api = {
     if (!res.ok) throw new Error(data.error || 'Failed to delete result.');
     return data;
   },
+  async exportResultsToDocx(resultIds) {
+    const res = await fetch('/api/results/export-docx', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ resultIds })
+    });
+    if (!res.ok) {
+      let message = 'Failed to generate document.';
+      try { const data = await res.json(); message = data.error || message; } catch (e) {}
+      throw new Error(message);
+    }
+    return res.blob();
+  },
   async getDashboardSummary() {
     const res = await fetch('/api/dashboard-summary');
     if (!res.ok) throw new Error('Failed to load dashboard summary.');
@@ -270,6 +283,18 @@ function drawRatingPieChart(canvas, results) {
   });
 }
 
+// Triggers a browser download for a Blob response (e.g. a generated .docx),
+// the same way downloadCSV does for CSV text.
+function downloadBlob(filename, blob) {
+  const link = document.createElement('a');
+  link.href = URL.createObjectURL(blob);
+  link.setAttribute('download', filename);
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+  setTimeout(() => URL.revokeObjectURL(link.href), 4000);
+}
+
 function downloadCSV(filename, rows) {
   const header = ['School', 'Qualification', 'Name', 'Age', 'Sex', 'Score', 'Rating', 'Date Taken'];
   const escapedRows = [header.join(',')].concat(rows.map(row =>
@@ -362,5 +387,103 @@ function setButtonLoading(btn, loading, originalText) {
     btn.classList.remove('loading');
     btn.disabled = false;
     btn.textContent = btn.dataset.originalText || btn.textContent;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Shared "Review Answers" modal — staff-only, Google-Forms-style breakdown of
+// a single exam attempt showing every question, the student's answer, and
+// the correct answer. Injected once so any staff page can call
+// openReviewModal(resultId) without extra markup.
+// ---------------------------------------------------------------------------
+(function() {
+  const overlay = document.createElement('div');
+  overlay.className = 'modal-overlay';
+  overlay.id = 'reviewModalOverlay';
+  overlay.innerHTML = `
+    <div class="modal-box" role="dialog" aria-modal="true" aria-labelledby="reviewModalTitle">
+      <div class="modal-header">
+        <div>
+          <h3 id="reviewModalTitle">Review</h3>
+          <p class="inline-note" id="reviewModalSubtitle" style="margin-top:0.25rem;"></p>
+        </div>
+        <button class="modal-close" id="reviewModalClose" type="button" aria-label="Close review">&times;</button>
+      </div>
+      <div class="modal-body" id="reviewModalBody"><p class="inline-note">Loading...</p></div>
+    </div>
+  `;
+  document.addEventListener('DOMContentLoaded', () => {
+    document.body.appendChild(overlay);
+    document.getElementById('reviewModalClose').addEventListener('click', closeReviewModal);
+    overlay.addEventListener('click', event => {
+      if (event.target === overlay) closeReviewModal();
+    });
+    document.addEventListener('keydown', event => {
+      if (event.key === 'Escape') closeReviewModal();
+    });
+  });
+})();
+
+function closeReviewModal() {
+  const overlay = document.getElementById('reviewModalOverlay');
+  if (overlay) overlay.classList.remove('open');
+}
+
+function renderAnswerReviewItem(answer, index) {
+  const isCorrect = answer.isCorrect;
+  const choicesHtml = answer.choices.map(choice => {
+    const isChoiceCorrect = choice.id === answer.correctChoiceId;
+    const isChoiceSelected = choice.id === answer.selectedChoice;
+    let cls = 'choice-neutral';
+    if (isChoiceCorrect) cls = 'choice-correct';
+    else if (isChoiceSelected) cls = 'choice-wrong';
+    let label = '';
+    if (isChoiceCorrect && isChoiceSelected) label = '<span class="choice-label" style="background:#d1fae5;color:#166534;">Correct — student picked</span>';
+    else if (isChoiceCorrect) label = '<span class="choice-label" style="background:#d1fae5;color:#166534;">Correct answer</span>';
+    else if (isChoiceSelected) label = '<span class="choice-label" style="background:#fee2e2;color:#991b1b;">Student picked</span>';
+    return `
+      <div class="choice-item ${cls}">
+        <span class="choice-id">${choice.id}</span>
+        <span class="choice-text">${choice.text}</span>
+        ${label}
+      </div>
+    `;
+  }).join('');
+
+  return `
+    <article class="answer-item ${isCorrect ? 'answer-correct' : 'answer-wrong'}">
+      <div class="answer-header">
+        <span class="answer-number">Question ${index + 1}</span>
+        <span class="answer-indicator ${isCorrect ? 'correct' : 'wrong'}">${isCorrect ? 'Correct' : (answer.selectedChoice ? 'Incorrect' : 'No answer')}</span>
+      </div>
+      <p class="answer-question">${answer.questionText}</p>
+      <div class="answer-choices">${choicesHtml}</div>
+    </article>
+  `;
+}
+
+async function openReviewModal(resultId) {
+  const overlay = document.getElementById('reviewModalOverlay');
+  const title = document.getElementById('reviewModalTitle');
+  const subtitle = document.getElementById('reviewModalSubtitle');
+  const body = document.getElementById('reviewModalBody');
+  if (!overlay) return;
+
+  title.textContent = 'Loading review...';
+  subtitle.textContent = '';
+  body.innerHTML = '<p class="inline-note">Loading answers...</p>';
+  overlay.classList.add('open');
+
+  try {
+    const result = await api.getResult(resultId);
+    title.textContent = `${result.studentName} — ${result.examType}`;
+    subtitle.textContent = `${result.qualification} · Score ${result.score}/${result.totalItems} · ${result.rating} · ${formatDateLocal(result.dateTaken)}`;
+    if (!result.answers.length) {
+      body.innerHTML = '<p class="inline-note">No answer data was recorded for this attempt.</p>';
+      return;
+    }
+    body.innerHTML = result.answers.map(renderAnswerReviewItem).join('');
+  } catch (error) {
+    body.innerHTML = `<p class="inline-note">Failed to load review: ${error.message}</p>`;
   }
 }

@@ -311,6 +311,14 @@
                 </svg>
               </button>
               <div class="row-menu-dropdown" data-menu-dropdown data-id="${item.id}">
+                <button class="row-menu-item" type="button" data-action="review" data-id="${item.id}">
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                    <path d="M1.5 12s3.75-7 10.5-7 10.5 7 10.5 7-3.75 7-10.5 7-10.5-7-10.5-7Z" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+                    <circle cx="12" cy="12" r="3" stroke="currentColor" stroke-width="1.8"/>
+                  </svg>
+                  Review Answers
+                </button>
+                <div class="row-menu-divider"></div>
                 <button class="row-menu-item danger" type="button" data-action="delete" data-id="${item.id}">
                   <svg width="16" height="16" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
                     <path d="M4 7h16M9 7V4.5A1.5 1.5 0 0 1 10.5 3h3A1.5 1.5 0 0 1 15 4.5V7m2 0-.7 12.1a2 2 0 0 1-2 1.9H9.7a2 2 0 0 1-2-1.9L7 7" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
@@ -360,6 +368,10 @@
           closeAllMenus();
           const id = button.getAttribute('data-id');
           const action = button.getAttribute('data-action');
+          if (action === 'review') {
+            openReviewModal(id);
+            return;
+          }
           if (action === 'delete') {
             const confirmed = window.confirm('Delete this student result permanently?');
             if (!confirmed) return;
