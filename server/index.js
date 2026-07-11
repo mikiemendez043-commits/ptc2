@@ -222,15 +222,27 @@ function buildAnswerDetails(questionRows, answers) {
   });
 }
 
-// Loads a single question's image as a resized PNG buffer, ready to embed in
-// the exported Word document. Handles both storage styles used elsewhere in
-// this file: base64 imageData (current) and legacy on-disk imagePath. Sized
-// down to keep the export small regardless of how many students are included.
-// One single sharp pass (resize + toBuffer with resolveWithObject) instead of
-// a separate metadata() call — that was decoding every image twice.
+// Loads a single question's image as a resized JPEG buffer, ready to embed
+// in the exported Word document. If this question was exported before, the
+// resized result is read straight from the DB cache (docxThumbnail) — no
+// image decoding at all. Otherwise it's generated once with a single sharp
+// pass and then cached for every future export. JPEG (not PNG) is used for
+// the output because encoding is noticeably faster, which matters most on
+// Render's shared/throttled free-tier CPU.
 // Returns null (never throws) if there's no image or it can't be read, so a
 // missing/corrupt image never breaks the whole export.
 async function loadQuestionImageForDocx(row) {
+  if (row.docxThumbnail) {
+    try {
+      const cached = JSON.parse(row.docxThumbnail);
+      if (cached && cached.data && cached.width && cached.height) {
+        return { buffer: Buffer.from(cached.data, 'base64'), width: cached.width, height: cached.height };
+      }
+    } catch (e) {
+      // Cached value is somehow corrupt — fall through and regenerate below.
+    }
+  }
+
   try {
     let sourceBuffer = null;
     if (row.imageData) {
@@ -243,14 +255,19 @@ async function loadQuestionImageForDocx(row) {
     if (!sourceBuffer) return null;
 
     // Kept small on purpose — this is a reference thumbnail for the question,
-    // not a full-size reproduction, so multi-student exports don't balloon
-    // into dozens of pages. fit:'inside' preserves aspect ratio and caps
-    // both dimensions in one step; withoutEnlargement skips upscaling small
-    // images (also skips wasted work on tiny images).
+    // not a full-size reproduction. fit:'inside' preserves aspect ratio and
+    // caps both dimensions in one step; withoutEnlargement skips upscaling.
     const { data, info } = await sharp(sourceBuffer)
       .resize({ width: 260, height: 220, fit: 'inside', withoutEnlargement: true })
-      .png({ compressionLevel: 4 })
+      .jpeg({ quality: 78 })
       .toBuffer({ resolveWithObject: true });
+
+    // Cache it for next time — fire-and-forget so THIS request isn't held up
+    // waiting on the write. If it fails, the next export just regenerates it.
+    db.execute({
+      sql: 'UPDATE questions SET docxThumbnail = ? WHERE id = ?',
+      args: [JSON.stringify({ data: data.toString('base64'), width: info.width, height: info.height }), row.id]
+    }).catch(e => console.error('Failed to cache docx thumbnail:', e));
 
     return { buffer: data, width: info.width, height: info.height };
   } catch (e) {
@@ -548,18 +565,21 @@ app.put('/api/questions/:id', requireStaffAuth, upload.single('image'), async (r
 
     let imageData = existing.imageData || null;
     let imagePath = existing.imagePath || null;
+    let imageChanged = false;
     if (req.file) {
       const resized = await sharp(req.file.buffer).resize({ width: 800, withoutEnlargement: true }).jpeg({ quality: 70 }).toBuffer();
       const b64 = resized.toString('base64');
       imageData = `data:image/jpeg;base64,${b64}`;
       imagePath = null; // new upload replaces any legacy path
+      imageChanged = true;
     } else if (removeImage === 'true') {
       imageData = null;
       imagePath = null;
+      imageChanged = true;
     }
 
     await db.execute({
-      sql: `UPDATE questions SET questionText = ?, imagePath = ?, imageData = ?, choiceA = ?, choiceB = ?, choiceC = ?, choiceD = ?, correctChoiceId = ?, updatedAt = ? WHERE id = ?`,
+      sql: `UPDATE questions SET questionText = ?, imagePath = ?, imageData = ?, choiceA = ?, choiceB = ?, choiceC = ?, choiceD = ?, correctChoiceId = ?, updatedAt = ?${imageChanged ? ', docxThumbnail = NULL' : ''} WHERE id = ?`,
       args: [questionText.trim(), imagePath, imageData, choiceA.trim(), choiceB.trim(), choiceC.trim(), choiceD.trim(), correctChoiceId, new Date().toISOString(), req.params.id]
     });
 
@@ -1012,6 +1032,7 @@ app.delete('/api/results/:id', requireStaffAuth, async (req, res) => {
 // review for each selected result — correct answer and the student's answer
 // both marked, one student/exam per page.
 app.post('/api/results/export-docx', requireStaffAuth, async (req, res) => {
+  const exportStartedAt = Date.now();
   try {
     const { resultIds } = req.body || {};
     if (!Array.isArray(resultIds) || !resultIds.length) {
@@ -1024,6 +1045,7 @@ app.post('/api/results/export-docx', requireStaffAuth, async (req, res) => {
     // Fetched in parallel — each fetch only ever holds one small text row
     // (never image bytes, those come later), so running them concurrently is
     // safe and cuts wall-clock time considerably for multi-result exports.
+    const resultsStartedAt = Date.now();
     const fetchedRows = await Promise.all(
       resultIds
         .filter(id => typeof id === 'string')
@@ -1035,21 +1057,22 @@ app.post('/api/results/export-docx', requireStaffAuth, async (req, res) => {
     if (!results.length) return res.status(404).json({ error: 'None of the selected results could be found.' });
 
     results.sort((a, b) => a.studentName.localeCompare(b.studentName) || a.examType.localeCompare(b.examType));
+    console.log(`[export-docx] fetched ${results.length} result(s) in ${Date.now() - resultsStartedAt}ms`);
 
     // Load each distinct question's image ONCE, no matter how many selected
     // students answered it — keeps a 150-result export bounded by the size of
     // the question bank (at most ~100 questions), not the number of students.
-    // Images are resized in parallel — this was previously the slow part,
-    // since libvips (the image library sharp uses) can process several
-    // images at once instead of waiting on each one in turn.
+    // Cached thumbnails (docxThumbnail) skip image processing entirely; only
+    // a question exported for the very first time pays the resize cost.
     const questionIds = Array.from(new Set(
       results.flatMap(r => r.answers.map(a => a.questionId)).filter(Boolean)
     ));
+    const imagesStartedAt = Date.now();
     const imageMap = new Map();
     if (questionIds.length) {
       const placeholders = questionIds.map(() => '?').join(',');
       const questionRows = await db.execute({
-        sql: `SELECT id, imageData, imagePath FROM questions WHERE id IN (${placeholders})`,
+        sql: `SELECT id, imageData, imagePath, docxThumbnail FROM questions WHERE id IN (${placeholders})`,
         args: questionIds
       });
       const loadedImages = await Promise.all(
@@ -1059,8 +1082,12 @@ app.post('/api/results/export-docx', requireStaffAuth, async (req, res) => {
         if (loadedImages[i]) imageMap.set(row.id, loadedImages[i]);
       });
     }
+    console.log(`[export-docx] resolved ${imageMap.size}/${questionIds.length} image(s) in ${Date.now() - imagesStartedAt}ms`);
 
+    const buildStartedAt = Date.now();
     const buffer = await buildResultsDocxBuffer(results, imageMap);
+    console.log(`[export-docx] built .docx in ${Date.now() - buildStartedAt}ms — total ${Date.now() - exportStartedAt}ms`);
+
     const filename = `exam-results-review-${new Date().toISOString().slice(0, 10)}.docx`;
     res.set('Content-Type', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document');
     res.set('Content-Disposition', `attachment; filename="${filename}"`);

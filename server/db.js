@@ -1,4 +1,4 @@
-const path = require('path');
+\const path = require('path');
 const fs = require('fs');
 const { createClient } = require('@libsql/client');
 
@@ -83,6 +83,14 @@ initDb().then(async () => {
   // Wrapped in try/catch since SQLite errors if the column already exists.
   try {
     await db.execute('ALTER TABLE questions ADD COLUMN updatedAt TEXT');
+  } catch (e) {
+    // Column already exists — safe to ignore.
+  }
+  // Migration: cache column for the pre-resized "Word export" thumbnail of a
+  // question's image, so generating a .docx doesn't have to re-decode and
+  // resize the same image every single time it's exported.
+  try {
+    await db.execute('ALTER TABLE questions ADD COLUMN docxThumbnail TEXT');
   } catch (e) {
     // Column already exists — safe to ignore.
   }
