@@ -226,6 +226,8 @@ function buildAnswerDetails(questionRows, answers) {
 // the exported Word document. Handles both storage styles used elsewhere in
 // this file: base64 imageData (current) and legacy on-disk imagePath. Sized
 // down to keep the export small regardless of how many students are included.
+// One single sharp pass (resize + toBuffer with resolveWithObject) instead of
+// a separate metadata() call — that was decoding every image twice.
 // Returns null (never throws) if there's no image or it can't be read, so a
 // missing/corrupt image never breaks the whole export.
 async function loadQuestionImageForDocx(row) {
@@ -242,23 +244,15 @@ async function loadQuestionImageForDocx(row) {
 
     // Kept small on purpose — this is a reference thumbnail for the question,
     // not a full-size reproduction, so multi-student exports don't balloon
-    // into dozens of pages. Width capped first, then height capped too (for
-    // tall/portrait images), preserving aspect ratio either way.
-    const maxWidth = 260;
-    const maxHeight = 220;
-    const metadata = await sharp(sourceBuffer).metadata();
-    const naturalWidth = metadata.width || maxWidth;
-    const naturalHeight = metadata.height || maxHeight;
+    // into dozens of pages. fit:'inside' preserves aspect ratio and caps
+    // both dimensions in one step; withoutEnlargement skips upscaling small
+    // images (also skips wasted work on tiny images).
+    const { data, info } = await sharp(sourceBuffer)
+      .resize({ width: 260, height: 220, fit: 'inside', withoutEnlargement: true })
+      .png({ compressionLevel: 4 })
+      .toBuffer({ resolveWithObject: true });
 
-    let width = Math.min(naturalWidth, maxWidth);
-    let height = Math.round((naturalHeight / naturalWidth) * width);
-    if (height > maxHeight) {
-      height = maxHeight;
-      width = Math.round((naturalWidth / naturalHeight) * height);
-    }
-
-    const pngBuffer = await sharp(sourceBuffer).resize({ width }).png({ quality: 90 }).toBuffer();
-    return { buffer: pngBuffer, width, height };
+    return { buffer: data, width: info.width, height: info.height };
   } catch (e) {
     console.error('Failed to load question image for Word export:', e);
     return null;
@@ -1027,14 +1021,17 @@ app.post('/api/results/export-docx', requireStaffAuth, async (req, res) => {
       return res.status(400).json({ error: 'Please select 150 or fewer results at a time.' });
     }
 
-    // Fetched one at a time (same principle as the answersData cleanup script) so
-    // memory usage never grows with the number of results being exported.
-    const results = [];
-    for (const id of resultIds) {
-      if (typeof id !== 'string') continue;
-      const row = await db.execute({ sql: 'SELECT * FROM results WHERE id = ?', args: [id] });
-      if (row.rows[0]) results.push(rowToResult(row.rows[0]));
-    }
+    // Fetched in parallel — each fetch only ever holds one small text row
+    // (never image bytes, those come later), so running them concurrently is
+    // safe and cuts wall-clock time considerably for multi-result exports.
+    const fetchedRows = await Promise.all(
+      resultIds
+        .filter(id => typeof id === 'string')
+        .map(id => db.execute({ sql: 'SELECT * FROM results WHERE id = ?', args: [id] }))
+    );
+    const results = fetchedRows
+      .map(r => (r.rows[0] ? rowToResult(r.rows[0]) : null))
+      .filter(Boolean);
     if (!results.length) return res.status(404).json({ error: 'None of the selected results could be found.' });
 
     results.sort((a, b) => a.studentName.localeCompare(b.studentName) || a.examType.localeCompare(b.examType));
@@ -1042,6 +1039,9 @@ app.post('/api/results/export-docx', requireStaffAuth, async (req, res) => {
     // Load each distinct question's image ONCE, no matter how many selected
     // students answered it — keeps a 150-result export bounded by the size of
     // the question bank (at most ~100 questions), not the number of students.
+    // Images are resized in parallel — this was previously the slow part,
+    // since libvips (the image library sharp uses) can process several
+    // images at once instead of waiting on each one in turn.
     const questionIds = Array.from(new Set(
       results.flatMap(r => r.answers.map(a => a.questionId)).filter(Boolean)
     ));
@@ -1052,10 +1052,12 @@ app.post('/api/results/export-docx', requireStaffAuth, async (req, res) => {
         sql: `SELECT id, imageData, imagePath FROM questions WHERE id IN (${placeholders})`,
         args: questionIds
       });
-      for (const row of questionRows.rows) {
-        const image = await loadQuestionImageForDocx(row);
-        if (image) imageMap.set(row.id, image);
-      }
+      const loadedImages = await Promise.all(
+        questionRows.rows.map(row => loadQuestionImageForDocx(row))
+      );
+      questionRows.rows.forEach((row, i) => {
+        if (loadedImages[i]) imageMap.set(row.id, loadedImages[i]);
+      });
     }
 
     const buffer = await buildResultsDocxBuffer(results, imageMap);
