@@ -244,8 +244,8 @@ async function loadQuestionImageForDocx(row) {
     // not a full-size reproduction, so multi-student exports don't balloon
     // into dozens of pages. Width capped first, then height capped too (for
     // tall/portrait images), preserving aspect ratio either way.
-    const maxWidth = 210;
-    const maxHeight = 170;
+    const maxWidth = 260;
+    const maxHeight = 220;
     const metadata = await sharp(sourceBuffer).metadata();
     const naturalWidth = metadata.width || maxWidth;
     const naturalHeight = metadata.height || maxHeight;
@@ -270,7 +270,7 @@ async function loadQuestionImageForDocx(row) {
 // selected result (student + exam type), showing every question with the
 // student's answer and the correct answer marked, Google-Forms-review style.
 // ---------------------------------------------------------------------------
-function docxMetaTable(result) {
+function docxMetaLines(result) {
   const rows = [
     ['Student Name', result.studentName],
     ['Qualification', result.qualification],
@@ -282,24 +282,13 @@ function docxMetaTable(result) {
     ['Rating', result.rating]
   ];
 
-  return new Table({
-    width: { size: 100, type: WidthType.PERCENTAGE },
-    rows: rows.map(([label, value]) => new TableRow({
-      children: [
-        new TableCell({
-          width: { size: 28, type: WidthType.PERCENTAGE },
-          shading: { type: ShadingType.CLEAR, color: 'auto', fill: 'F1F5F9' },
-          margins: { top: 100, bottom: 100, left: 150, right: 150 },
-          children: [new Paragraph({ children: [new TextRun({ text: label, bold: true, size: 20 })] })]
-        }),
-        new TableCell({
-          width: { size: 72, type: WidthType.PERCENTAGE },
-          margins: { top: 100, bottom: 100, left: 150, right: 150 },
-          children: [new Paragraph({ children: [new TextRun({ text: String(value), size: 20 })] })]
-        })
-      ]
-    }))
-  });
+  return rows.map(([label, value]) => new Paragraph({
+    spacing: { after: 60 },
+    children: [
+      new TextRun({ text: `${label}:  `, bold: true, size: 20 }),
+      new TextRun({ text: String(value), size: 20 })
+    ]
+  }));
 }
 
 function docxChoiceParagraph(choice, answer) {
@@ -384,7 +373,7 @@ async function buildResultsDocxBuffer(results, imageMap) {
       spacing: { after: 200 },
       children: [new TextRun({ text: 'PTC-Catanduanes Exam System — Staff Review', italics: true, color: '52606D' })]
     }));
-    children.push(docxMetaTable(result));
+    children.push(...docxMetaLines(result));
     children.push(new Paragraph({
       heading: HeadingLevel.HEADING_2,
       spacing: { before: 300, after: 140 },
@@ -400,12 +389,7 @@ async function buildResultsDocxBuffer(results, imageMap) {
 
   const doc = new Document({
     styles: { default: { document: { run: { font: 'Calibri', size: 22 } } } },
-    sections: [{
-      properties: {
-        column: { count: 2, space: 400 }
-      },
-      children
-    }]
+    sections: [{ children }]
   });
 
   return Packer.toBuffer(doc);
