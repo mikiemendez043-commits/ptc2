@@ -1090,3 +1090,20 @@ p {
     align-items: stretch;
   }
 }
+
+/* ── Export progress popup (animated indeterminate line + status text) ──── */
+.progress-line-track {
+  width: 100%;
+  height: 6px;
+  border-radius: 999px;
+  background: rgba(148, 163, 184, 0.25);
+  overflow: hidden;
+  position: relative;
+}
+.progress-line-fill {
+  height: 100%;
+  width: 0%;
+  border-radius: 999px;
+  background: var(--primary);
+  transition: width 0.2s ease-out;
+}
