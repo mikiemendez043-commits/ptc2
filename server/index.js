@@ -17,8 +17,7 @@ const {
   TableCell,
   WidthType,
   ShadingType,
-  BorderStyle,
-  SectionType
+  BorderStyle
 } = require('docx');
 
 const { db, IMAGES_DIR } = require('./db');
@@ -223,27 +222,13 @@ function buildAnswerDetails(questionRows, answers) {
   });
 }
 
-// Which questions get the bigger, clearer "full width" image treatment
-// instead of the compact 2-column thumbnail. TLT01 needs it for every
-// question; OLT01 only for these specific item numbers (matching the order
-// questions were added — the same order they appear in the exam and in this
-// review); TNT01 never needs it, the small version is fine there.
-const OLT01_CLEAR_IMAGE_QUESTIONS = new Set([21, 22, 23, 28, 29, 30, 31]);
-function needsClearImage(examType, questionNumber) {
-  if (examType === 'TLT01') return true;
-  if (examType === 'OLT01') return OLT01_CLEAR_IMAGE_QUESTIONS.has(questionNumber);
-  return false;
-}
-
-const COMPACT_IMAGE_SIZE = { maxWidth: 210, maxHeight: 170 };
-const CLEAR_IMAGE_SIZE = { maxWidth: 480, maxHeight: 380 };
-
 // Loads a single question's image as a resized PNG buffer, ready to embed in
 // the exported Word document. Handles both storage styles used elsewhere in
-// this file: base64 imageData (current) and legacy on-disk imagePath.
+// this file: base64 imageData (current) and legacy on-disk imagePath. Sized
+// down to keep the export small regardless of how many students are included.
 // Returns null (never throws) if there's no image or it can't be read, so a
 // missing/corrupt image never breaks the whole export.
-async function loadQuestionImageForDocx(row, sizeConfig) {
+async function loadQuestionImageForDocx(row) {
   try {
     let sourceBuffer = null;
     if (row.imageData) {
@@ -255,9 +240,12 @@ async function loadQuestionImageForDocx(row, sizeConfig) {
     }
     if (!sourceBuffer) return null;
 
-    // Width capped first, then height capped too (for tall/portrait images),
-    // preserving aspect ratio either way.
-    const { maxWidth, maxHeight } = sizeConfig;
+    // Kept small on purpose — this is a reference thumbnail for the question,
+    // not a full-size reproduction, so multi-student exports don't balloon
+    // into dozens of pages. Width capped first, then height capped too (for
+    // tall/portrait images), preserving aspect ratio either way.
+    const maxWidth = 210;
+    const maxHeight = 170;
     const metadata = await sharp(sourceBuffer).metadata();
     const naturalWidth = metadata.width || maxWidth;
     const naturalHeight = metadata.height || maxHeight;
@@ -335,7 +323,7 @@ function docxChoiceParagraph(choice, answer) {
   return new Paragraph(paragraphOptions);
 }
 
-function docxQuestionBlock(answer, index, resolvedImage) {
+function docxQuestionBlock(answer, index, imageMap) {
   const children = [
     new Paragraph({
       spacing: { before: 220, after: 80 },
@@ -346,13 +334,14 @@ function docxQuestionBlock(answer, index, resolvedImage) {
     })
   ];
 
-  if (resolvedImage) {
+  const image = imageMap && imageMap.get(answer.questionId);
+  if (image) {
     children.push(new Paragraph({
       spacing: { after: 100 },
       children: [
         new ImageRun({
-          data: resolvedImage.buffer,
-          transformation: { width: resolvedImage.width, height: resolvedImage.height }
+          data: image.buffer,
+          transformation: { width: image.width, height: image.height }
         })
       ]
     }));
@@ -372,77 +361,51 @@ function docxQuestionBlock(answer, index, resolvedImage) {
 }
 
 async function buildResultsDocxBuffer(results, imageMap) {
-  // Instead of one fixed column count for the whole document, content is
-  // split into segments — most of it stays in the compact 2-column layout,
-  // but TLT01 (entirely) and specific OLT01 items switch to a single
-  // full-width column so their images can be shown bigger and clearer.
-  // Adjacent segments with the same column count are merged, and section
-  // breaks use "continuous" so this never forces an extra page.
-  const segments = [];
-  function pushToSegment(columns, blockChildren) {
-    const last = segments[segments.length - 1];
-    if (last && last.columns === columns) {
-      last.children.push(...blockChildren);
-    } else {
-      segments.push({ columns, children: [...blockChildren] });
-    }
-  }
+  const children = [];
 
   results.forEach((result, resultIndex) => {
-    const defaultColumns = result.examType === 'TLT01' ? 1 : 2;
-
     if (resultIndex > 0) {
       // A subtle divider between students instead of a forced page break —
       // short results now simply continue on the same page rather than
       // leaving the rest of a page blank.
-      pushToSegment(defaultColumns, [new Paragraph({
+      children.push(new Paragraph({
         spacing: { before: 260, after: 260 },
         border: { bottom: { color: 'CBD5E1', space: 4, style: BorderStyle.SINGLE, size: 8 } },
         children: []
-      })]);
+      }));
     }
 
-    pushToSegment(defaultColumns, [
-      new Paragraph({
-        heading: HeadingLevel.HEADING_1,
-        spacing: { after: 80 },
-        children: [new TextRun({ text: `${result.studentName} — ${result.examType}` })]
-      }),
-      new Paragraph({
-        spacing: { after: 200 },
-        children: [new TextRun({ text: 'PTC-Catanduanes Exam System — Staff Review', italics: true, color: '52606D' })]
-      }),
-      docxMetaTable(result),
-      new Paragraph({
-        heading: HeadingLevel.HEADING_2,
-        spacing: { before: 300, after: 140 },
-        children: [new TextRun({ text: 'Item-by-Item Review' })]
-      })
-    ]);
+    children.push(new Paragraph({
+      heading: HeadingLevel.HEADING_1,
+      spacing: { after: 80 },
+      children: [new TextRun({ text: `${result.studentName} — ${result.examType}` })]
+    }));
+    children.push(new Paragraph({
+      spacing: { after: 200 },
+      children: [new TextRun({ text: 'PTC-Catanduanes Exam System — Staff Review', italics: true, color: '52606D' })]
+    }));
+    children.push(docxMetaTable(result));
+    children.push(new Paragraph({
+      heading: HeadingLevel.HEADING_2,
+      spacing: { before: 300, after: 140 },
+      children: [new TextRun({ text: 'Item-by-Item Review' })]
+    }));
 
     if (!result.answers.length) {
-      pushToSegment(defaultColumns, [new Paragraph({ text: 'No answer data was recorded for this attempt.' })]);
+      children.push(new Paragraph({ text: 'No answer data was recorded for this attempt.' }));
     } else {
-      result.answers.forEach((answer, idx) => {
-        const questionNumber = idx + 1;
-        const useClear = needsClearImage(result.examType, questionNumber);
-        const columns = useClear ? 1 : defaultColumns;
-        const variants = imageMap.get(answer.questionId);
-        const resolvedImage = variants ? (useClear ? variants.clear : variants.compact) : null;
-        pushToSegment(columns, docxQuestionBlock(answer, idx, resolvedImage));
-      });
+      result.answers.forEach((answer, idx) => children.push(...docxQuestionBlock(answer, idx, imageMap)));
     }
   });
 
   const doc = new Document({
     styles: { default: { document: { run: { font: 'Calibri', size: 22 } } } },
-    sections: segments.map(segment => ({
+    sections: [{
       properties: {
-        type: SectionType.CONTINUOUS,
-        column: { count: segment.columns, space: 400 }
+        column: { count: 2, space: 400 }
       },
-      children: segment.children
-    }))
+      children
+    }]
   });
 
   return Packer.toBuffer(doc);
@@ -1095,8 +1058,6 @@ app.post('/api/results/export-docx', requireStaffAuth, async (req, res) => {
     // Load each distinct question's image ONCE, no matter how many selected
     // students answered it — keeps a 150-result export bounded by the size of
     // the question bank (at most ~100 questions), not the number of students.
-    // Both a compact and a "clear" (bigger) variant are prepared up front so
-    // buildResultsDocxBuffer can just pick the right one per question.
     const questionIds = Array.from(new Set(
       results.flatMap(r => r.answers.map(a => a.questionId)).filter(Boolean)
     ));
@@ -1108,9 +1069,8 @@ app.post('/api/results/export-docx', requireStaffAuth, async (req, res) => {
         args: questionIds
       });
       for (const row of questionRows.rows) {
-        const compact = await loadQuestionImageForDocx(row, COMPACT_IMAGE_SIZE);
-        const clear = await loadQuestionImageForDocx(row, CLEAR_IMAGE_SIZE);
-        if (compact || clear) imageMap.set(row.id, { compact, clear: clear || compact });
+        const image = await loadQuestionImageForDocx(row);
+        if (image) imageMap.set(row.id, image);
       }
     }
 
