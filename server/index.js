@@ -370,12 +370,30 @@ function docxQuestionBlock(answer, index, imageMap) {
 
 async function buildResultsDocxBuffer(results, imageMap) {
   const children = [];
+  let lastExamType = null;
 
   results.forEach((result, resultIndex) => {
-    if (resultIndex > 0) {
-      // A subtle divider between students instead of a forced page break —
-      // short results simply continue on the same page/column rather than
-      // leaving space blank.
+    const isNewExamType = result.examType !== lastExamType;
+
+    if (isNewExamType) {
+      // A clearly labeled section break whenever the exam type changes —
+      // exam types are never interleaved or blurred together, each one
+      // reads as its own distinct block.
+      if (resultIndex > 0) {
+        children.push(new Paragraph({
+          spacing: { before: 240, after: 0 },
+          border: { bottom: { color: '1D4ED8', space: 6, style: BorderStyle.SINGLE, size: 18 } },
+          children: []
+        }));
+      }
+      children.push(new Paragraph({
+        heading: HeadingLevel.HEADING_1,
+        spacing: { before: 200, after: 160 },
+        children: [new TextRun({ text: `${result.examType} — Exam Results`, color: '1D4ED8' })]
+      }));
+      lastExamType = result.examType;
+    } else {
+      // Lighter divider between students who share the same exam type.
       children.push(new Paragraph({
         spacing: { before: 180, after: 180 },
         border: { bottom: { color: 'CBD5E1', space: 4, style: BorderStyle.SINGLE, size: 8 } },
@@ -384,9 +402,9 @@ async function buildResultsDocxBuffer(results, imageMap) {
     }
 
     children.push(new Paragraph({
-      heading: HeadingLevel.HEADING_1,
+      heading: HeadingLevel.HEADING_2,
       spacing: { after: 60 },
-      children: [new TextRun({ text: `${result.studentName} — ${result.examType}` })]
+      children: [new TextRun({ text: result.studentName })]
     }));
     children.push(new Paragraph({
       spacing: { after: 140 },
@@ -394,7 +412,7 @@ async function buildResultsDocxBuffer(results, imageMap) {
     }));
     children.push(...docxMetaLines(result));
     children.push(new Paragraph({
-      heading: HeadingLevel.HEADING_2,
+      heading: HeadingLevel.HEADING_3,
       spacing: { before: 220, after: 100 },
       children: [new TextRun({ text: 'Item-by-Item Review' })]
     }));
@@ -1073,7 +1091,10 @@ app.post('/api/results/export-docx', requireStaffAuth, async (req, res) => {
       .filter(Boolean);
     if (!results.length) return res.status(404).json({ error: 'None of the selected results could be found.' });
 
-    results.sort((a, b) => a.studentName.localeCompare(b.studentName) || a.examType.localeCompare(b.examType));
+    // Exam type first, then student name — so buildResultsDocxBuffer's
+    // per-exam-type section breaks land in the right places and different
+    // exam types never end up interleaved in the document.
+    results.sort((a, b) => a.examType.localeCompare(b.examType) || a.studentName.localeCompare(b.studentName));
     console.log(`[export-docx] fetched ${results.length} result(s) in ${Date.now() - resultsStartedAt}ms`);
 
     // Load each distinct question's image ONCE, no matter how many selected
