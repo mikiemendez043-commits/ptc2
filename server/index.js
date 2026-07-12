@@ -17,7 +17,8 @@ const {
   TableCell,
   WidthType,
   ShadingType,
-  BorderStyle
+  BorderStyle,
+  PageBreak
 } = require('docx');
 
 const { db, IMAGES_DIR } = require('./db');
@@ -376,19 +377,17 @@ async function buildResultsDocxBuffer(results, imageMap) {
     const isNewExamType = result.examType !== lastExamType;
 
     if (isNewExamType) {
-      // A clearly labeled section break whenever the exam type changes —
-      // exam types are never interleaved or blurred together, each one
-      // reads as its own distinct block.
+      // A real page break whenever the exam type changes — even if there was
+      // room left on the current page, the next exam type always starts
+      // fresh on a new page instead of filling that leftover space. Students
+      // within the SAME exam type still flow continuously (no page break),
+      // just separated by the lighter divider below.
       if (resultIndex > 0) {
-        children.push(new Paragraph({
-          spacing: { before: 240, after: 0 },
-          border: { bottom: { color: '1D4ED8', space: 6, style: BorderStyle.SINGLE, size: 18 } },
-          children: []
-        }));
+        children.push(new Paragraph({ children: [new PageBreak()] }));
       }
       children.push(new Paragraph({
         heading: HeadingLevel.HEADING_1,
-        spacing: { before: 200, after: 160 },
+        spacing: { before: 0, after: 160 },
         children: [new TextRun({ text: `${result.examType} — Exam Results`, color: '1D4ED8' })]
       }));
       lastExamType = result.examType;
