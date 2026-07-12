@@ -371,34 +371,21 @@ function docxQuestionBlock(answer, index, imageMap) {
 
 async function buildResultsDocxBuffer(results, imageMap) {
   const children = [];
-  let lastExamType = null;
 
   results.forEach((result, resultIndex) => {
-    const isNewExamType = result.examType !== lastExamType;
-
-    if (isNewExamType) {
-      // A real page break whenever the exam type changes — even if there was
-      // room left on the current page, the next exam type always starts
-      // fresh on a new page instead of filling that leftover space. Students
-      // within the SAME exam type still flow continuously (no page break),
-      // just separated by the lighter divider below.
-      if (resultIndex > 0) {
-        children.push(new Paragraph({ children: [new PageBreak()] }));
-      }
-      children.push(new Paragraph({
-        heading: HeadingLevel.HEADING_1,
-        spacing: { before: 0, after: 160 },
-        children: [new TextRun({ text: `${result.examType} — Exam Results`, color: '1D4ED8' })]
-      }));
-      lastExamType = result.examType;
-    } else {
-      // Lighter divider between students who share the same exam type.
-      children.push(new Paragraph({
-        spacing: { before: 180, after: 180 },
-        border: { bottom: { color: 'CBD5E1', space: 4, style: BorderStyle.SINGLE, size: 8 } },
-        children: []
-      }));
+    // Hard page break before every student, no exceptions — each result gets
+    // its own page. Since exam type changes always land on a student
+    // boundary too, this automatically also gives exam types their own
+    // page break, with no separate handling needed.
+    if (resultIndex > 0) {
+      children.push(new Paragraph({ children: [new PageBreak()] }));
     }
+
+    children.push(new Paragraph({
+      heading: HeadingLevel.HEADING_1,
+      spacing: { before: 0, after: 160 },
+      children: [new TextRun({ text: `${result.examType} — Exam Results`, color: '1D4ED8' })]
+    }));
 
     children.push(new Paragraph({
       heading: HeadingLevel.HEADING_2,
