@@ -222,20 +222,28 @@ function buildAnswerDetails(questionRows, answers) {
   });
 }
 
+// Bump this whenever the target thumbnail size/format changes. Cached rows
+// from an older version are ignored and regenerated — this is what prevents
+// a mistake where an old, larger cached image (sized for a previous layout)
+// gets reused and overflows a narrower column in a newer layout.
+const DOCX_THUMBNAIL_VERSION = 2;
+const DOCX_IMAGE_MAX_WIDTH = 220;
+const DOCX_IMAGE_MAX_HEIGHT = 170;
+
 // Loads a single question's image as a resized JPEG buffer, ready to embed
-// in the exported Word document. If this question was exported before, the
-// resized result is read straight from the DB cache (docxThumbnail) — no
-// image decoding at all. Otherwise it's generated once with a single sharp
-// pass and then cached for every future export. JPEG (not PNG) is used for
-// the output because encoding is noticeably faster, which matters most on
-// Render's shared/throttled free-tier CPU.
+// in the exported Word document. If this question was exported before (at
+// the current thumbnail version), the resized result is read straight from
+// the DB cache (docxThumbnail) — no image decoding at all. Otherwise it's
+// generated once with a single sharp pass and then cached for every future
+// export. JPEG (not PNG) is used because encoding is noticeably faster,
+// which matters most on Render's shared/throttled free-tier CPU.
 // Returns null (never throws) if there's no image or it can't be read, so a
 // missing/corrupt image never breaks the whole export.
 async function loadQuestionImageForDocx(row) {
   if (row.docxThumbnail) {
     try {
       const cached = JSON.parse(row.docxThumbnail);
-      if (cached && cached.data && cached.width && cached.height) {
+      if (cached && cached.v === DOCX_THUMBNAIL_VERSION && cached.data && cached.width && cached.height) {
         return { buffer: Buffer.from(cached.data, 'base64'), width: cached.width, height: cached.height };
       }
     } catch (e) {
@@ -258,7 +266,7 @@ async function loadQuestionImageForDocx(row) {
     // not a full-size reproduction. fit:'inside' preserves aspect ratio and
     // caps both dimensions in one step; withoutEnlargement skips upscaling.
     const { data, info } = await sharp(sourceBuffer)
-      .resize({ width: 260, height: 220, fit: 'inside', withoutEnlargement: true })
+      .resize({ width: DOCX_IMAGE_MAX_WIDTH, height: DOCX_IMAGE_MAX_HEIGHT, fit: 'inside', withoutEnlargement: true })
       .jpeg({ quality: 78 })
       .toBuffer({ resolveWithObject: true });
 
@@ -266,7 +274,7 @@ async function loadQuestionImageForDocx(row) {
     // waiting on the write. If it fails, the next export just regenerates it.
     db.execute({
       sql: 'UPDATE questions SET docxThumbnail = ? WHERE id = ?',
-      args: [JSON.stringify({ data: data.toString('base64'), width: info.width, height: info.height }), row.id]
+      args: [JSON.stringify({ v: DOCX_THUMBNAIL_VERSION, data: data.toString('base64'), width: info.width, height: info.height }), row.id]
     }).catch(e => console.error('Failed to cache docx thumbnail:', e));
 
     return { buffer: data, width: info.width, height: info.height };
@@ -294,7 +302,7 @@ function docxMetaLines(result) {
   ];
 
   return rows.map(([label, value]) => new Paragraph({
-    spacing: { after: 60 },
+    spacing: { after: 40 },
     children: [
       new TextRun({ text: `${label}:  `, bold: true, size: 20 }),
       new TextRun({ text: String(value), size: 20 })
@@ -316,7 +324,7 @@ function docxChoiceParagraph(choice, answer) {
     runs.push(new TextRun({ text: '  (answer)', italics: true, size: 16, color: isCorrect ? '2D6A4F' : 'B02A37' }));
   }
 
-  const paragraphOptions = { indent: { left: 200 }, spacing: { after: 40 }, children: runs };
+  const paragraphOptions = { indent: { left: 160 }, spacing: { after: 30 }, children: runs };
   if (isCorrect) paragraphOptions.shading = { type: ShadingType.CLEAR, color: 'auto', fill: 'E9F9EF' };
   else if (isSelected) paragraphOptions.shading = { type: ShadingType.CLEAR, color: 'auto', fill: 'FDECEC' };
 
@@ -326,10 +334,10 @@ function docxChoiceParagraph(choice, answer) {
 function docxQuestionBlock(answer, index, imageMap) {
   const children = [
     new Paragraph({
-      spacing: { before: 220, after: 80 },
+      spacing: { before: 160, after: 50 },
       children: [
-        new TextRun({ text: `Q${index + 1}. `, bold: true }),
-        new TextRun({ text: answer.questionText })
+        new TextRun({ text: `Q${index + 1}. `, bold: true, size: 20 }),
+        new TextRun({ text: answer.questionText, size: 20 })
       ]
     })
   ];
@@ -337,7 +345,7 @@ function docxQuestionBlock(answer, index, imageMap) {
   const image = imageMap && imageMap.get(answer.questionId);
   if (image) {
     children.push(new Paragraph({
-      spacing: { after: 100 },
+      spacing: { after: 70 },
       children: [
         new ImageRun({
           data: image.buffer,
@@ -353,8 +361,8 @@ function docxQuestionBlock(answer, index, imageMap) {
     ? 'Result: Correct'
     : (answer.selectedChoice ? 'Result: Incorrect' : 'Result: No answer given');
   children.push(new Paragraph({
-    spacing: { before: 80, after: 40 },
-    children: [new TextRun({ text: verdictText, bold: true, size: 20, color: answer.isCorrect ? '166534' : '991B1B' })]
+    spacing: { before: 50, after: 20 },
+    children: [new TextRun({ text: verdictText, bold: true, size: 18, color: answer.isCorrect ? '166534' : '991B1B' })]
   }));
 
   return children;
@@ -366,10 +374,10 @@ async function buildResultsDocxBuffer(results, imageMap) {
   results.forEach((result, resultIndex) => {
     if (resultIndex > 0) {
       // A subtle divider between students instead of a forced page break —
-      // short results now simply continue on the same page rather than
-      // leaving the rest of a page blank.
+      // short results simply continue on the same page/column rather than
+      // leaving space blank.
       children.push(new Paragraph({
-        spacing: { before: 260, after: 260 },
+        spacing: { before: 180, after: 180 },
         border: { bottom: { color: 'CBD5E1', space: 4, style: BorderStyle.SINGLE, size: 8 } },
         children: []
       }));
@@ -377,17 +385,17 @@ async function buildResultsDocxBuffer(results, imageMap) {
 
     children.push(new Paragraph({
       heading: HeadingLevel.HEADING_1,
-      spacing: { after: 80 },
+      spacing: { after: 60 },
       children: [new TextRun({ text: `${result.studentName} — ${result.examType}` })]
     }));
     children.push(new Paragraph({
-      spacing: { after: 200 },
-      children: [new TextRun({ text: 'PTC-Catanduanes Exam System — Staff Review', italics: true, color: '52606D' })]
+      spacing: { after: 140 },
+      children: [new TextRun({ text: 'PTC-Catanduanes Exam System — Staff Review', italics: true, color: '52606D', size: 18 })]
     }));
     children.push(...docxMetaLines(result));
     children.push(new Paragraph({
       heading: HeadingLevel.HEADING_2,
-      spacing: { before: 300, after: 140 },
+      spacing: { before: 220, after: 100 },
       children: [new TextRun({ text: 'Item-by-Item Review' })]
     }));
 
@@ -399,8 +407,17 @@ async function buildResultsDocxBuffer(results, imageMap) {
   });
 
   const doc = new Document({
-    styles: { default: { document: { run: { font: 'Calibri', size: 22 } } } },
-    sections: [{ children }]
+    styles: { default: { document: { run: { font: 'Calibri', size: 21 } } } },
+    sections: [{
+      properties: {
+        // Slimmer margins than Word's 1" default free up real width for the
+        // two columns, so each column has more room for text and images —
+        // fewer pages without anything feeling cramped.
+        page: { margin: { top: 720, bottom: 720, left: 720, right: 720 } },
+        column: { count: 2, space: 400 }
+      },
+      children
+    }]
   });
 
   return Packer.toBuffer(doc);
